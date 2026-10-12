@@ -1,0 +1,963 @@
+📚 Полная документация системы мониторинга BTC рынков
+📋 Оглавление
+Общее описание системы
+
+Архитектура и компоненты
+
+Подробный разбор ApiManager
+
+Подробный разбор MarketController
+
+Подробный разбор MarketState
+
+Подробный разбор UIDisplay
+
+Поток данных
+
+Тайминг и циклы
+
+Обработка ошибок
+
+Отладка и мониторинг
+
+🎯 Общее описание системы
+Что делает система?
+Это автоматический мониторинг 15-минутных BTC рынков на платформе Polymarket. Система:
+
+Находит активные 15-минутные рынки "Bitcoin Up/Down"
+
+Определяет цену BTC на момент начала рынка (priceToBeat)
+
+Отслеживает изменение цены в реальном времени
+
+Автоматически переходит к следующему рынку каждые 15 минут
+
+Отображает все данные в пользовательском интерфейсе
+
+Основная проблема, которую решает система
+API Polymarket возвращает некорректные даты начала и окончания рынков. Например:
+
+startDate: 2026-01-14T09:53:32.526383Z (14 января)
+
+endDate: 2026-01-15T10:00:00Z (15 января)
+
+Это приводит к неправильному определению длительности рынка и, как следствие, к неверному расчету priceToBeat (разница в $1800+ за 8 минут).
+
+Решение: Система игнорирует даты от API и самостоятельно рассчитывает 15-минутные интервалы на основе текущего времени.
+
+🏗️ Архитектура и компоненты
+Общая схема взаимодействия
+text
+┌─────────────────────────────────────────────────────────────┐
+│                    Unity Application                        │
+├──────────────┬──────────────┬──────────────┬──────────────┤
+│  UIDisplay   │ MarketControl│  MarketState │  ApiManager  │
+│    (UI)      │    ler       │   (Data)     │   (API)      │
+└──────┬───────┴──────┬───────┴──────┬───────┴──────┬───────┘
+       │               │               │              │
+       ▼               ▼               ▼              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                Внешние сервисы (API)                        │
+│  • Polymarket (рынки)                                      │
+│  • Binance (цены BTC)                                      │
+└─────────────────────────────────────────────────────────────┘
+Роли каждого компонента
+Компонент	Роль	Аналог в реальном мире
+ApiManager	"Курьер" - ходит за данными во внешние сервисы	Почтальон, который ходит на почту
+MarketController	"Менеджер" - управляет всем процессом	Директор магазина, который всем руководит
+MarketState	"Бухгалтерская книга" - хранит текущие данные	Кассовая книга с текущими цифрами
+UIDisplay	"Витрина" - показывает информацию клиентам	Витрина магазина
+🔌 ApiManager - работа с API
+Назначение
+Этот класс отвечает за все коммуникации с внешними сервисами. Он знает, как:
+
+Найти рынки на Polymarket
+
+Получить исторические цены с Binance
+
+Получить текущие цены с Binance
+
+Ключевые методы с подробным объяснением
+🔍 FindActive15MinuteBtcMarket()
+Что делает: Ищет активный 15-минутный BTC рынок.
+
+csharp
+public IEnumerator FindActive15MinuteBtcMarket(Action<PolymarketEvent> onSuccess, Action<string> onError)
+{
+    Debug.Log("[MarketSearch] Starting search for active 15-minute BTC market");
+    yield return StartCoroutine(SearchByGeneratedSlug(onSuccess, onError));
+}
+Как работает:
+
+Логирует начало поиска
+
+Вызывает SearchByGeneratedSlug() - первую стратегию поиска
+
+Использует IEnumerator и yield return для асинхронной работы
+
+Почему IEnumerator?
+Unity использует корутины (coroutines) для асинхронных операций. IEnumerator позволяет "приостанавливать" выполнение метода, ждать ответа от API, а потом продолжать.
+
+🏷️ SearchByGeneratedSlug()
+Что делает: Пытается найти рынок по сгенерированному URL (slug).
+
+csharp
+private IEnumerator SearchByGeneratedSlug(Action<PolymarketEvent> onSuccess, Action<string> onError)
+{
+    string currentTimestamp = GetCurrent15MinTimestamp();
+    Debug.Log($"[MarketSearch] Current 15-minute timestamp: {currentTimestamp}");
+    
+    string[] possibleSlugs = {
+        $"btc-updown-15m-{currentTimestamp}",
+        $"bitcoin-updown-15m-{currentTimestamp}",
+        $"btc-15m-{currentTimestamp}",
+        $"bitcoin-15m-{currentTimestamp}"
+    };
+    
+    foreach (var slug in possibleSlugs)
+    {
+        Debug.Log($"[MarketSearch] Trying slug: {slug}");
+        // ... запрос к API ...
+    }
+}
+Подробнее о slug:
+Slug - это часть URL, которая идентифицирует ресурс. Например:
+https://polymarket.com/event/btc-updown-15m-1705240800
+Здесь btc-updown-15m-1705240800 - slug рынка.
+
+Генерация timestamp:
+
+csharp
+private string GetCurrent15MinTimestamp()
+{
+    DateTime now = DateTime.UtcNow;
+    long unixTimestamp = ((DateTimeOffset)now).ToUnixTimeSeconds();
+    long fifteenMinBlocks = unixTimestamp / 900;  // 900 секунд = 15 минут
+    long currentBlockTimestamp = fifteenMinBlocks * 900;
+    
+    return currentBlockTimestamp.ToString();
+}
+Пример: Если сейчас 10:07:30, то:
+
+Unix время: 1705241250 секунд
+
+Делим на 900: 1705241250 / 900 = 1894712 (целочисленное деление)
+
+Умножаем обратно: 1894712 * 900 = 1705240800
+
+Это соответствует времени 10:00:00
+
+💰 GetPriceAtMarketStart()
+Что делает: Получает цену BTC на момент начала рынка.
+
+csharp
+public IEnumerator GetPriceAtMarketStart(DateTime marketStartTime, Action<double> onSuccess, Action<string> onError)
+{
+    Debug.Log($"[PriceFetch] Requesting BTC price at market start: {marketStartTime:HH:mm:ss}");
+    
+    // Try to get exact historical price
+    yield return StartCoroutine(GetExactHistoricalPrice(marketStartTime, 
+        onSuccess: (price) => {
+            onSuccess?.Invoke(price);
+        },
+        onError: (error) => {
+            Debug.Log($"[PriceFetch] Historical price failed: {error}, trying fallback...");
+            // Fallback to current price if historical fails
+            StartCoroutine(GetCurrentBTCPrice(onSuccess, onError));
+        }
+    ));
+}
+Архитектурный паттерн: Callback functions (Action<>)
+Вместо возврата значения напрямую, метод принимает две функции:
+
+onSuccess - что делать при успехе
+
+onError - что делать при ошибке
+
+Это стандартный подход в асинхронном программировании Unity.
+
+🕰️ GetExactHistoricalPrice() (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+Что делает: Получает точную историческую цену с Binance.
+
+csharp
+private IEnumerator GetExactHistoricalPrice(DateTime targetTime, Action<double> onSuccess, Action<string> onError)
+{
+    // Round to the start of the minute (00 seconds) for Binance 1m candles
+    DateTime candleStartTime = new DateTime(
+        targetTime.Year, targetTime.Month, targetTime.Day, 
+        targetTime.Hour, targetTime.Minute, 0, DateTimeKind.Utc
+    );
+    
+    long startTimestamp = ((DateTimeOffset)candleStartTime).ToUnixTimeMilliseconds();
+    
+    // Request the specific 1-minute candle that started at our exact time
+    string url = $"https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime={startTimestamp}&limit=1";
+    
+    Debug.Log($"[PriceFetch] Requesting exact candle for: {candleStartTime:HH:mm:ss}");
+    
+    using (UnityWebRequest request = UnityWebRequest.Get(url))
+    {
+        yield return request.SendWebRequest();
+        
+        if (request.result != UnityWebRequest.Result.Success)
+        {
+            Debug.LogWarning($"[PriceFetch] Failed to get exact candle: {request.error}");
+            onError?.Invoke("Failed to fetch historical price");
+            yield break;
+        }
+        
+        string json = request.downloadHandler.text;
+        
+        // ... парсинг ответа ...
+    }
+}
+Что такое Klines?
+Klines (или свечи) - это формат данных биржи, который содержит:
+
+Время открытия свечи
+
+Цену открытия (Open)
+
+Максимальную цену (High)
+
+Минимальную цену (Low)
+
+Цену закрытия (Close)
+
+Объем торгов
+
+Пример ответа Binance:
+
+json
+[
+  [
+    1705240800000,      // Open time (timestamp в миллисекундах)
+    "95010.58",         // Open price (цена открытия) ← НАМ НУЖНА ЭТА!
+    "95050.00",         // High
+    "94980.00",         // Low
+    "95025.00",         // Close
+    "15.256",           // Volume
+    1705240859999,      // Close time
+    "1448925.00",       // Quote asset volume
+    100,                // Number of trades
+    "5.256",            // Taker buy base asset volume
+    "6.256",            // Taker buy quote asset volume
+    "0"                 // Ignore
+  ]
+]
+Почему округляем до начала минуты?
+Binance хранит данные по 1-минутным свечам, которые начинаются на :00 каждой минуты. Если рынок начался в 09:53:32, мы ищем свечу, которая началась в 09:53:00.
+
+🎮 MarketController - бизнес-логика
+Назначение
+Это мозг системы. Он координирует все остальные компоненты, управляет состоянием и переходами между рынками.
+
+Ключевые поля (переменные класса)
+csharp
+private bool isTrading = false;           // Флаг: идет ли сейчас мониторинг
+private int currentMarketId = 0;          // ID текущего рынка (для предотвращения конфликтов)
+private Coroutine marketSearchCoroutine;  // Ссылка на корутину поиска рынка
+private Coroutine dataUpdateCoroutine;    // Ссылка на корутину обновления данных
+private Coroutine marketResetCoroutine;   // Ссылка на корутину принудительного сброса
+Почему три корутины?
+Каждая корутина отвечает за свой процесс:
+
+marketSearchCoroutine - поиск и настройка рынков
+
+dataUpdateCoroutine - обновление данных раз в секунду
+
+marketResetCoroutine - принудительный сброс каждые 15 минут
+
+Основной жизненный цикл
+🚀 StartMonitoring() - запуск системы
+csharp
+public void StartMonitoring()
+{
+    if (isTrading) return;  // Уже работает? Не запускаем повторно
+    
+    Debug.Log("[MarketController] Starting market monitoring");
+    isTrading = true;
+    currentMarketId++;  // Увеличиваем ID для нового запуска
+    
+    // Запускаем 15-минутный цикл принудительного сброса
+    StartMarketResetCycle();
+    
+    // Начинаем поиск рынка
+    marketSearchCoroutine = StartCoroutine(FindAndSetupMarket());
+}
+Важность currentMarketId:
+Представьте, что старый рынок еще завершается, а мы уже начали искать новый. currentMarketId помогает отслеживать, какой рынок сейчас актуален.
+
+🔄 FindAndSetupMarket() - основной цикл поиска
+csharp
+private IEnumerator FindAndSetupMarket()
+{
+    while (isTrading)  // Пока пользователь не остановит мониторинг
+    {
+        searchCount++;
+        int thisMarketId = currentMarketId;  // Запоминаем ID этого поиска
+        
+        Debug.Log($"[MarketController] Market search (attempt #{searchCount}, market #{thisMarketId})");
+        
+        // 1. Ищем рынок через ApiManager
+        PolymarketEvent foundMarket = null;
+        bool searchCompleted = false;
+        
+        yield return StartCoroutine(apiManager.FindActive15MinuteBtcMarket(
+            onSuccess: (market) => {
+                foundMarket = market;
+                searchCompleted = true;
+            },
+            onError: (error) => {
+                searchCompleted = true;
+            }
+        ));
+        
+        // 2. Если не нашли реальный рынок → тестовый
+        if (foundMarket == null && isTrading)
+        {
+            Debug.Log("[MarketController] Using test market");
+            foundMarket = apiManager.GetTestMarket();
+        }
+        
+        // 3. Если нашли рынок И это еще актуальный поиск
+        if (foundMarket != null && isTrading && thisMarketId == currentMarketId)
+        {
+            // Настраиваем рынок
+            yield return StartCoroutine(SetupMarketWithHistoricalPrice(foundMarket));
+            
+            // Ждем, пока рынок активен
+            while (marketState.IsMarketActive() && isTrading && thisMarketId == currentMarketId)
+            {
+                yield return new WaitForSeconds(1f);  // Проверяем каждую секунду
+            }
+            
+            // 4. Рынок завершился
+            if (isTrading && thisMarketId == currentMarketId)
+            {
+                OnMarketCompleted();  // Логируем результаты
+                
+                // Ждем перед поиском следующего
+                yield return new WaitForSeconds(marketSearchDelay);
+            }
+        }
+    }
+}
+Ключевые проверки:
+
+isTrading - пользователь еще не остановил мониторинг?
+
+thisMarketId == currentMarketId - это все еще актуальный рынок?
+
+⚙️ SetupMarketWithHistoricalPrice() - настройка рынка
+csharp
+private IEnumerator SetupMarketWithHistoricalPrice(PolymarketEvent market)
+{
+    Debug.Log($"[MarketController] Setting up market: {market.title}");
+    
+    // 1. Обновляем информацию о рынке (в MarketState)
+    marketState.UpdateMarketInfo(market);
+    
+    // 2. Получаем время начала рынка
+    DateTime marketStartTime = marketState.Current.sessionStartTime;
+    
+    // 3. Получаем цену BTC на момент начала рынка
+    yield return StartCoroutine(GetHistoricalStartingPrice(marketStartTime));
+    
+    // 4. Запускаем обновление данных
+    StartDataUpdates();
+    
+    // 5. Обновляем UI
+    UpdateUI();
+}
+🔄 DataUpdateLoop() - цикл обновления данных
+csharp
+private IEnumerator DataUpdateLoop()
+{
+    Debug.Log("[MarketController] Starting data updates");
+    
+    int updateCount = 0;
+    
+    while (marketState.IsMarketActive() && isTrading)
+    {
+        updateCount++;
+        
+        // Каждые 30 обновлений (30 секунд) логируем время
+        if (updateCount % 30 == 0)
+        {
+            int secondsRemaining = marketState.GetSecondsRemaining();
+            Debug.Log($"[MarketController] Update #{updateCount}, Time remaining: {secondsRemaining / 60}:{secondsRemaining % 60:D2}");
+        }
+        
+        // 1. Получаем текущую цену BTC
+        yield return StartCoroutine(apiManager.GetCurrentBTCPrice(
+            onSuccess: (price) => marketState.UpdateCurrentPrice(price),
+            onError: (error) => Debug.Log($"[MarketController] Price update error: {error}")
+        ));
+        
+        // 2. Генерируем тестовые данные стакана
+        marketState.GenerateTestOrderbookData();
+        marketState.GenerateTestVolume();
+        
+        // 3. Обновляем UI
+        UpdateUI();
+        
+        // 4. Ждем 1 секунду до следующего обновления
+        yield return new WaitForSeconds(updateInterval);
+    }
+}
+Что такое "стакан заявок" (orderbook)?
+Это список всех заявок на покупку (bid) и продажу (ask) с указанием цен и объемов. В нашей системе эти данные генерируются случайно для демонстрации.
+
+⏰ MarketResetCycle() - принудительный сброс
+csharp
+private IEnumerator MarketResetCycle()
+{
+    Debug.Log("[MarketController] Starting 15-minute market reset cycle");
+    
+    while (isTrading)
+    {
+        // Ждем 15 минут (900 секунд)
+        yield return new WaitForSeconds(900f);
+        
+        if (isTrading)
+        {
+            Debug.Log("[MarketController] 15-minute cycle complete - resetting market");
+            currentMarketId++;  // Новый ID для нового рынка
+            
+            // Останавливаем текущие обновления
+            if (dataUpdateCoroutine != null)
+            {
+                StopCoroutine(dataUpdateCoroutine);
+                dataUpdateCoroutine = null;
+            }
+            
+            // Запускаем поиск нового рынка
+            marketSearchCoroutine = StartCoroutine(FindAndSetupMarket());
+        }
+    }
+}
+Зачем нужен принудительный сброс?
+Даже если что-то пошло не так (API не отвечает, логика определения времени сломалась), каждые 15 минут система гарантированно попытается найти новый рынок.
+
+📊 MarketState - модель данных
+Назначение
+Это модель данных системы. Она хранит всю информацию о текущем рынке и предоставляет методы для работы с этими данными.
+
+Структура данных ActiveMarketData
+csharp
+[Serializable]
+public class ActiveMarketData
+{
+    public string eventId;              // ID события от Polymarket
+    public string eventTitle;           // Название рынка
+    public DateTime sessionStartTime;   // Время начала (РАССЧИТАННОЕ)
+    public DateTime sessionEndTime;     // Время окончания (start + 15 мин)
+    public double priceToBeatChainlink; // Цена BTC на начало рынка
+    public double currentBtcPrice;      // Текущая цена BTC
+    public double bidUp;                // Цена покупки UP (тестовая)
+    public double askUp;                // Цена продажи UP (тестовая)
+    public double bidDown;              // Цена покупки DOWN (тестовая)
+    public double askDown;              // Цена продажи DOWN (тестовая)
+    public double volumeThis15m;        // Объем торгов (тестовый)
+    public double spreadFromStart;      // Изменение от цены начала
+    public DateTime lastUpdateTime;     // Время последнего обновления
+}
+Ключевые методы
+🕐 UpdateMarketInfo() - обновление информации о рынке
+csharp
+public void UpdateMarketInfo(PolymarketEvent market)
+{
+    try
+    {
+        current.eventId = market.id ?? "unknown";
+        current.eventTitle = GetMarketDisplayName(market);
+        
+        // ИГНОРИРУЕМ ДАТЫ ОТ API - они некорректны!
+        // Вместо этого рассчитываем 15-минутные интервалы самостоятельно
+        
+        DateTime now = DateTime.UtcNow;
+        DateTime marketStartTime = Calculate15MinuteStartTime(now);
+        DateTime marketEndTime = marketStartTime.AddMinutes(15);
+        
+        current.sessionStartTime = marketStartTime;
+        current.sessionEndTime = marketEndTime;
+        current.lastUpdateTime = now;
+        
+        Debug.Log($"[MarketState] Market: {current.eventTitle}");
+        Debug.Log($"[MarketState] Calculated interval: {marketStartTime:HH:mm:ss} - {marketEndTime:HH:mm:ss}");
+        Debug.Log($"[MarketState] Current UTC: {now:HH:mm:ss}");
+        Debug.Log($"[MarketState] Duration: 15.0 minutes");
+        
+        isInitialized = true;
+    }
+    catch (Exception e)
+    {
+        Debug.LogError($"[MarketState] UpdateMarketInfo error: {e.Message}");
+        
+        // Fallback на случай ошибки
+        DateTime now = DateTime.UtcNow;
+        DateTime startTime = Calculate15MinuteStartTime(now);
+        
+        current.sessionStartTime = startTime;
+        current.sessionEndTime = startTime.AddMinutes(15);
+        current.lastUpdateTime = now;
+        isInitialized = true;
+    }
+}
+🧮 Calculate15MinuteStartTime() - расчет времени начала
+csharp
+private DateTime Calculate15MinuteStartTime(DateTime currentTime)
+{
+    // Округляем вниз до ближайшего 15-минутного интервала
+    int minutes = currentTime.Minute;      // Например: 10:07 → minutes = 7
+    int remainder = minutes % 15;          // 7 % 15 = 7
+    
+    // Отнимаем остаток минут, секунд и миллисекунд
+    DateTime startTime = currentTime.AddMinutes(-remainder)
+                                      .AddSeconds(-currentTime.Second)
+                                      .AddMilliseconds(-currentTime.Millisecond);
+    
+    return startTime;  // 10:07:30.500 → 10:00:00.000
+}
+Визуализация расчета:
+
+text
+Текущее время: 10:07:30
+Шаг 1: minutes = 7
+Шаг 2: remainder = 7 % 15 = 7
+Шаг 3: 10:07:30 - 7 минут = 10:00:30
+Шаг 4: 10:00:30 - 30 секунд = 10:00:00
+Результат: 10:00:00
+✅ IsMarketActive() - проверка активности рынка
+csharp
+public bool IsMarketActive()
+{
+    if (!isInitialized) return false;
+    
+    // Рынок активен только если с момента начала прошло меньше 15 минут
+    DateTime now = DateTime.UtcNow;
+    TimeSpan timeSinceStart = now - current.sessionStartTime;
+    
+    // Рынок длится 15 минут, но добавляем буфер в 30 секунд для плавного перехода
+    bool isActive = timeSinceStart.TotalMinutes < 15.5 && GetSecondsRemaining() > 0;
+    
+    // Если прошло больше 16 минут, точно не активен
+    if (timeSinceStart.TotalMinutes >= 16)
+    {
+        return false;
+    }
+    
+    return isActive;
+}
+Почему 15.5 минут, а не 15?
+Добавляем 30-секундный буфер для:
+
+Неточности системных часов
+
+Задержек сети
+
+Плавного перехода к следующему рынку
+
+💵 GenerateTestOrderbookData() - генерация тестовых данных
+csharp
+public void GenerateTestOrderbookData()
+{
+    try
+    {
+        // Случайный спред от 1% до 3%
+        double spread = 0.01 + (random.NextDouble() * 0.02);
+        
+        // Цены для UP
+        current.bidUp = Math.Round(0.5 - spread/2, 3);  // Цена покупки UP
+        current.askUp = Math.Round(0.5 + spread/2, 3);  // Цена продажи UP
+        
+        // Цены для DOWN (дополняют UP до 1.0)
+        current.bidDown = Math.Round(1 - current.askUp, 3);
+        current.askDown = Math.Round(1 - current.bidUp, 3);
+        
+        current.lastUpdateTime = DateTime.UtcNow;
+    }
+    catch (Exception e)
+    {
+        Debug.LogError($"[MarketState] GenerateTestOrderbookData error: {e.Message}");
+    }
+}
+Логика цен UP/DOWN:
+На рынках "Up or Down" сумма вероятностей всегда равна 1 (100%):
+
+Если цена UP = 0.52 (52% вероятность), то цена DOWN = 0.48 (48% вероятность)
+
+Spread (спред) = askUp - bidUp = разница между ценой покупки и продажи
+
+🖥️ UIDisplay - пользовательский интерфейс
+Назначение
+Это представление (View) в архитектуре MVC (Model-View-Controller). Он отвечает только за отображение данных.
+
+Паттерн Singleton
+csharp
+public class UIDisplay : MonoBehaviour
+{
+    public static UIDisplay Instance;  // Единственный экземпляр
+    
+    private void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;  // Первый экземпляр
+        }
+        else
+        {
+            Destroy(gameObject);  // Уничтожаем дубликаты
+        }
+    }
+}
+Зачем Singleton?
+Чтобы другие компоненты могли легко получить доступ к UI:
+
+csharp
+// В любом месте кода:
+UIDisplay.Instance.UpdateDisplay(data);
+Связывание UI элементов
+csharp
+[Header("Market information")]
+[SerializeField] private TextMeshProUGUI marketTitleText;
+[SerializeField] private TextMeshProUGUI timeRemainingText;
+[SerializeField] private TextMeshProUGUI statusText;
+
+[Header("BTC Prices")]
+[SerializeField] private TextMeshProUGUI currentPriceText;
+[SerializeField] private TextMeshProUGUI priceToBeatText;
+[SerializeField] private TextMeshProUGUI spreadText;
+
+// ... остальные поля
+Как работает [SerializeField]:
+Это атрибут Unity, который позволяет видеть приватные поля в инспекторе и назначать их через перетаскивание.
+
+Обновление данных на UI
+csharp
+public void UpdateDisplay(ActiveMarketData data)
+{
+    if (marketTitleText == null) return;
+    
+    try
+    {
+        // 1. Название рынка
+        marketTitleText.text = data.eventTitle;
+        
+        // 2. Оставшееся время
+        int secondsRemaining = (int)Math.Max(0, (data.sessionEndTime - DateTime.UtcNow).TotalSeconds);
+        timeRemainingText.text = $"{secondsRemaining / 60:D2}:{secondsRemaining % 60:D2}";
+        
+        // 3. Цены
+        currentPriceText.text = $"${data.currentBtcPrice:F2}";
+        priceToBeatText.text = $"${data.priceToBeatChainlink:F2}";
+        
+        // 4. Спред (изменение)
+        double spread = data.spreadFromStart;
+        spreadText.text = spread >= 0 ? $"+${spread:F2}" : $"-${Math.Abs(spread):F2}";
+        
+        // ... остальные обновления
+    }
+    catch (Exception e)
+    {
+        Debug.LogError($"UI Error: {e.Message}");
+    }
+}
+Форматирование строк:
+
+:F2 - число с 2 знаками после запятой
+
+:D2 - целое число, минимум 2 цифры (01, 02, ...)
+
+$"..." - интерполяция строк (C# 6.0+)
+
+🔄 Поток данных
+Полный цикл от запуска до обновления UI
+text
+Пользователь нажимает "Start"
+         ↓
+MarketController.StartMonitoring()
+         ↓
+StartMarketResetCycle() ←---(каждые 15 минут)---┐
+         ↓                                       |
+FindAndSetupMarket()                             |
+         ↓                                       |
+1. ApiManager.FindActive15MinuteBtcMarket()      |
+   • Запрос к Polymarket API                     |
+   • Фильтрация BTC 15min рынков                 |
+         ↓                                       |
+2. Если рынок найден → SetupMarketWithHistoricalPrice()
+   • MarketState.UpdateMarketInfo()              |
+     - Игнорируем даты API                       |
+     - Рассчитываем 15-минутный интервал         |
+         ↓                                       |
+   • GetHistoricalStartingPrice()                |
+     - ApiManager.GetPriceAtMarketStart()        |
+       → Binance API (историческая цена)         |
+         ↓                                       |
+3. StartDataUpdates()                            |
+   • DataUpdateLoop() каждую секунду:            |
+     1. Текущая цена BTC ← Binance API           |
+     2. Обновление spreadFromStart               |
+     3. Генерация тестовых данных                |
+     4. UpdateUI() → UIDisplay.UpdateDisplay()   |
+         ↓                                       |
+4. Через 15 минут:                               |
+   • MarketState.IsMarketActive() = false        |
+   • OnMarketCompleted()                         |
+   • Ожидание marketSearchDelay                  |
+   • Возврат к шагу 1 → FindAndSetupMarket() ────┘
+Визуализация временных интервалов
+text
+День 1: [Рынок 1] [Рынок 2] [Рынок 3] ...
+        15min     15min     15min
+       10:00-10:15 10:15-10:30 10:30-10:45
+
+Текущее время: 10:07:30
+                 │
+                 ▼
+Начало рынка: 10:00:00 (рассчитано)
+Конец рынка:  10:15:00 (начало + 15 мин)
+Прошло:       7 минут 30 секунд
+Осталось:     7 минут 30 секунд
+⏱️ Тайминг и циклы
+Три параллельных таймера системы
+Таймер	Интервал	Назначение	Где реализован
+Рыночный таймер	15 минут	Длительность одного рынка	MarketState.IsMarketActive()
+Таймер обновлений	1 секунда	Обновление цен и UI	DataUpdateLoop()
+Таймер сброса	15 минут	Принудительный переход к новому рынку	MarketResetCycle()
+Как работает синхронизация
+csharp
+// В MarketState:
+public bool IsMarketActive()
+{
+    TimeSpan timeSinceStart = now - current.sessionStartTime;
+    return timeSinceStart.TotalMinutes < 15.5;  // ← 15.5 минут с буфером
+}
+
+// В MarketController:
+private IEnumerator MarketResetCycle()
+{
+    while (isTrading)
+    {
+        yield return new WaitForSeconds(900f);  // ← 900 секунд = 15 минут
+        // Принудительный сброс
+    }
+}
+Почему два таймера на 15 минут?
+
+IsMarketActive() - логический таймер, проверяет фактическое время работы рынка
+
+MarketResetCycle() - гарантийный таймер, сбрасывает систему даже если логика сломалась
+
+🛡️ Обработка ошибок
+Многоуровневая система fallback
+text
+Уровень 0: Идеальный сценарий
+    ↓
+Уровень 1: Проблемы с исторической ценой Binance
+    ↓
+Уровень 2: Проблемы с текущей ценой Binance  
+    ↓
+Уровень 3: Проблемы с API Polymarket
+    ↓
+Уровень 4: Локальный тестовый режим
+Реализация в коде
+Fallback для цены:
+csharp
+private IEnumerator GetHistoricalStartingPrice(DateTime marketStartTime)
+{
+    // Уровень 1: Точная историческая цена
+    yield return StartCoroutine(apiManager.GetPriceAtMarketStart(...));
+    
+    if (!priceObtained)
+    {
+        // Уровень 2: Текущая цена
+        Debug.Log("[MarketController] Using current price as fallback");
+        yield return StartCoroutine(GetCurrentPriceAsFallback());
+    }
+}
+
+private IEnumerator GetCurrentPriceAsFallback()
+{
+    yield return StartCoroutine(apiManager.GetCurrentBTCPrice(...));
+    
+    if (!priceObtained)
+    {
+        // Уровень 3: Тестовая цена
+        marketState.SetPriceToBeat(testStartPrice);
+        Debug.Log($"[MarketController] Using test price: ${testStartPrice:F2}");
+    }
+}
+Fallback для рынка:
+csharp
+private IEnumerator FindAndSetupMarket()
+{
+    // Ищем реальный рынок
+    yield return StartCoroutine(apiManager.FindActive15MinuteBtcMarket(...));
+    
+    // Если не нашли → тестовый рынок
+    if (foundMarket == null && isTrading)
+    {
+        Debug.Log("[MarketController] Using test market");
+        foundMarket = apiManager.GetTestMarket();
+    }
+}
+Обработка исключений
+csharp
+public void UpdateMarketInfo(PolymarketEvent market)
+{
+    try
+    {
+        // Основная логика...
+    }
+    catch (Exception e)
+    {
+        Debug.LogError($"[MarketState] UpdateMarketInfo error: {e.Message}");
+        
+        // Fallback логика
+        DateTime now = DateTime.UtcNow;
+        DateTime startTime = Calculate15MinuteStartTime(now);
+        
+        current.sessionStartTime = startTime;
+        current.sessionEndTime = startTime.AddMinutes(15);
+        current.lastUpdateTime = now;
+        isInitialized = true;
+    }
+}
+Принцип: Любая ошибка должна:
+
+Быть залогирована
+
+Не привести к краху системы
+
+По возможности перейти в fallback-режим
+
+🔍 Отладка и мониторинг
+Ключевые логи для отладки
+1. Проверка расчета времени
+csharp
+Debug.Log($"[MarketState] Calculated interval: {marketStartTime:HH:mm:ss} - {marketEndTime:HH:mm:ss}");
+Debug.Log($"[MarketState] Current UTC: {now:HH:mm:ss}");
+Что смотреть: Совпадает ли расчетное время с реальным? Например, если сейчас 10:07, рынок должен быть 10:00-10:15.
+
+2. Проверка получения цены
+csharp
+Debug.Log($"[PriceFetch] ✅ Exact historical price found: ${historicalPrice:F2}");
+Debug.Log($"[PriceFetch] ❌ Historical price failed: {error}");
+Что смотреть: Получаем ли историческую цену? Если нет, почему?
+
+3. Проверка переключения рынков
+csharp
+Debug.Log($"[MarketController] Market started {timeSinceStart.TotalMinutes:F1} minutes ago");
+Debug.Log($"[MarketController] 15-minute cycle complete - resetting market");
+Что смотреть: Переключаются ли рынки каждые 15 минут?
+
+Консольные команды для тестирования
+Добавьте в MarketController:
+
+csharp
+// В консоли Unity: MarketController.ForceNewMarketSearch()
+public void ForceNewMarketSearch()
+{
+    if (isTrading)
+    {
+        currentMarketId++;
+        
+        if (dataUpdateCoroutine != null)
+        {
+            StopCoroutine(dataUpdateCoroutine);
+            dataUpdateCoroutine = null;
+        }
+        
+        if (marketSearchCoroutine != null)
+        {
+            StopCoroutine(marketSearchCoroutine);
+        }
+        marketSearchCoroutine = StartCoroutine(FindAndSetupMarket());
+    }
+}
+
+// В консоли Unity: MarketController.DebugTimeInfo()
+public void DebugTimeInfo()
+{
+    DateTime now = DateTime.UtcNow;
+    Debug.Log($"[DEBUG] Current UTC: {now:HH:mm:ss}");
+    Debug.Log($"[DEBUG] Market start: {marketState.Current.sessionStartTime:HH:mm:ss}");
+    Debug.Log($"[DEBUG] Market end: {marketState.Current.sessionEndTime:HH:mm:ss}");
+    Debug.Log($"[DEBUG] Is market active: {marketState.IsMarketActive()}");
+}
+Мониторинг через UI
+Добавьте панель отладки в UIDisplay:
+
+csharp
+[Header("Debug Info")]
+[SerializeField] private TextMeshProUGUI debugText;
+
+public void UpdateDebugInfo(string info)
+{
+    if (debugText != null)
+    {
+        debugText.text = info;
+    }
+}
+
+// В MarketController:
+private void UpdateDebugInfo()
+{
+    if (UIDisplay.Instance != null)
+    {
+        string debugInfo = $"Market ID: {currentMarketId}\n" +
+                          $"Search count: {searchCount}\n" +
+                          $"Is trading: {isTrading}\n" +
+                          $"Market active: {marketState.IsMarketActive()}\n" +
+                          $"Time: {DateTime.UtcNow:HH:mm:ss}";
+        
+        UIDisplay.Instance.UpdateDebugInfo(debugInfo);
+    }
+}
+📝 Заключение
+Ключевые принципы системы
+Игнорирование ненадежных данных - не доверяем датам от Polymarket API
+
+Самостоятельный расчет времени - 15-минутные интервалы рассчитываем локально
+
+Многоуровневый fallback - система работает даже при поломке внешних API
+
+Гарантированный переход - принудительный сброс каждые 15 минут
+
+Разделение ответственности - каждый класс делает свою работу
+
+Что можно улучшить (TODO)
+Кэширование API запросов:
+
+csharp
+private Dictionary<string, CachedPrice> priceCache;
+Конфигурация через ScriptableObject:
+
+csharp
+[CreateAssetMenu]
+public class MarketConfig : ScriptableObject
+{
+    public float marketDuration = 900f;
+    public float updateInterval = 1f;
+    public double testPrice = 50000.0;
+}
+Сохранение состояния:
+
+csharp
+public void SaveState()
+{
+    PlayerPrefs.SetString("MarketState", JsonUtility.ToJson(marketState.Current));
+}
+Метрики и аналитика:
+
+csharp
+public class MarketMetrics
+{
+    public int MarketsMonitored { get; set; }
+    public double TotalVolume { get; set; }
+    public double AverageSpread { get; set; }
+}
+Эта система представляет собой надежное решение для мониторинга 15-минутных BTC рынков, которое продолжает работать даже при частичных отказах внешних сервисов, благодаря продуманной архитектуре и многоуровневой системе fallback.
