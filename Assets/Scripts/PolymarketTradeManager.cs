@@ -15,6 +15,9 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
     [SerializeField] private string clobHost = PolymarketConstants.CLOB_HOST;
     [SerializeField] private int chainId = PolymarketConstants.CHAIN_ID_POLYGON;
 
+    [Tooltip("Off: orders are built and signed, but POST /order is not sent (dry run).")]
+    [SerializeField] private bool realTradingEnabled = false;
+
     [Tooltip("0=EOA, 1=POLY_PROXY, 2=GNOSIS_SAFE (смотри доки).")]
     [SerializeField] private int signatureType = 0;
 
@@ -238,6 +241,12 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
             postOnly: false
         );
 
+        if (!realTradingEnabled)
+        {
+            LogDryRun("BUY", tokenId, ask, makerAmount, takerAmount, expiration);
+            yield break;
+        }
+
         yield return StartCoroutine(clob.PostOrder(
             apiKey: apiKey,
             secret: secret,
@@ -339,6 +348,12 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
                 postOnly: false
             );
 
+            if (!realTradingEnabled)
+            {
+                LogDryRun("SELL", tokenId, bid, makerAmount, takerAmount, expiration);
+                yield break;
+            }
+
             bool done = false;
             bool ok = false;
 
@@ -376,6 +391,15 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
         }
 
         Fail($"Sell: exceeded max attempts ({sellMaxAttempts})");
+    }
+
+    // Signed order summary for dry runs. No signature, keys or API credentials.
+    private void LogDryRun(string side, string tokenId, double price, BigInteger makerAmount, BigInteger takerAmount, BigInteger expiration)
+    {
+        string outcome = (activeOutcome == Outcome.Up) ? "UP" : "DOWN";
+        string tokenTail = tokenId.Length > 6 ? tokenId.Substring(tokenId.Length - 6) : tokenId;
+        Debug.Log($"[DRY RUN] {side} {outcome}: price={price} makerAmount={makerAmount} takerAmount={takerAmount} " +
+                  $"expiration={expiration} token=...{tokenTail}. Order signed, not sent (realTradingEnabled is off).");
     }
 
     private void Fail(string err)
