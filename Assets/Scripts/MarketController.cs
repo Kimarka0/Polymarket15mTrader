@@ -20,7 +20,6 @@ public class MarketController : MonoBehaviour
     private ApiManager apiManager;
     private Coroutine marketSearchCoroutine;
     private Coroutine dataUpdateCoroutine;
-    private Coroutine marketResetCoroutine;
     private Coroutine orderBookCoroutine;
     private string currentConditionId;
 
@@ -93,8 +92,6 @@ public class MarketController : MonoBehaviour
             UIDisplay.Instance.SetInfoMessage("SEARCHING MARKET");
         }
 
-        StartMarketResetCycle();
-
         if (marketSearchCoroutine != null)
         {
             StopCoroutine(marketSearchCoroutine);
@@ -123,12 +120,6 @@ public class MarketController : MonoBehaviour
         {
             StopCoroutine(dataUpdateCoroutine);
             dataUpdateCoroutine = null;
-        }
-
-        if (marketResetCoroutine != null)
-        {
-            StopCoroutine(marketResetCoroutine);
-            marketResetCoroutine = null;
         }
 
         marketState.SetInitialized(false);
@@ -601,44 +592,6 @@ private void LogTradesForInterval(int pagesFetched, int newTrades)
         }
     }
 
-    private void StartMarketResetCycle()
-    {
-        if (marketResetCoroutine != null)
-        {
-            StopCoroutine(marketResetCoroutine);
-        }
-
-        marketResetCoroutine = StartCoroutine(MarketResetCycle());
-    }
-
-    private IEnumerator MarketResetCycle()
-    {
-        Debug.Log("[MarketController] Starting 15-minute market reset cycle");
-
-        while (isTrading)
-        {
-
-            yield return new WaitForSeconds(900f);
-
-            if (isTrading)
-            {
-                Debug.Log("[MarketController] 15-minute cycle complete - resetting market");
-                currentMarketId++;
-
-                if (dataUpdateCoroutine != null)
-                {
-                    StopCoroutine(dataUpdateCoroutine);
-                    dataUpdateCoroutine = null;
-                }
-
-                if (marketSearchCoroutine != null)
-                {
-                    StopCoroutine(marketSearchCoroutine);
-                }
-                marketSearchCoroutine = StartCoroutine(FindAndSetupMarket());
-            }
-        }
-    }
 
     private void UpdateUI()
     {
