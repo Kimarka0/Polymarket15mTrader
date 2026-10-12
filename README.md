@@ -8,11 +8,12 @@ Unity app for Polymarket's 15-minute "Bitcoin Up or Down" markets. It shows live
 
 - Finds the current 15-minute BTC market through the Gamma API.
 - Takes the BTC price at the start of the interval from Binance (the "price to beat").
-- Polls the BTC price and the UP/DOWN order books every second, and recent trades every 5 seconds to calculate volume.
+- Polls the BTC price and the UP/DOWN order books every second.
+- Calculates the 15-minute volume from all trades of the current market: every 5 seconds it loads new trades page by page, keeps them without duplicates and starts over when the market changes.
 - Switches to the next market when the interval ends.
 - Gets Polymarket API credentials with an EIP-712 signature (L1 auth, then L2 API keys).
 - Places FOK buy and sell orders, signed locally with Nethereum. Sell uses the actual position size from the Data API.
-- Dry-run mode (default): orders are built and signed but not sent.
+- Dry-run mode (default): orders are built and signed but not sent; a short summary goes to the log.
 
 If no market is found, the app falls back to a test market. Without order books it shows random test prices.
 
@@ -39,7 +40,7 @@ graph LR
 - `PolymarketTradeManager`: builds, signs and sends orders; dry run, double-click guard, amount limit.
 - `PolymarketDataApiClient`: reads the current position size for Sell.
 - `OrderAmountCalculator`: order amounts in `decimal`, used by `PolymarketTradeManager`.
-- `MarketInterval`, `TradeVolumeCalculator`: 15-minute interval, market slugs and trade volume, without Unity dependencies.
+- `MarketInterval`, `TradeVolumeCalculator`, `TradeAccumulator`: 15-minute interval, market slugs, trade volume and collecting trades between polls, without Unity dependencies.
 
 ## Requirements
 
@@ -68,7 +69,7 @@ cd OrderMath
 dotnet test
 ```
 
-The pure C# classes (`OrderAmountCalculator`, `MarketInterval`, `TradeVolumeCalculator`) are linked from `Assets/Scripts` into a separate .NET project, so there is one copy and it can be tested without Unity. The tests cover order amounts (zero, negative, NaN, extreme prices, rounding, rounding down positions), the 15-minute interval and slugs, and trade volume. A reference test measures how the `decimal` amounts differ from the old `float` formulas: for example a $16.03 buy is now exactly 16030000 micro-USDC instead of 16030001.
+The pure C# classes (`OrderAmountCalculator`, `MarketInterval`, `TradeVolumeCalculator`, `TradeAccumulator`) are linked from `Assets/Scripts` into a separate .NET project, so there is one copy and it can be tested without Unity. The tests cover order amounts (zero, negative, NaN, extreme prices, rounding, rounding down positions), the 15-minute interval and slugs, trade volume, and collecting trades (duplicates, reset on a new market, when to load the next page). A reference test measures how the `decimal` amounts differ from the old `float` formulas: for example a $16.03 buy is now exactly 16030000 micro-USDC instead of 16030001.
 
 ## Known issues
 
@@ -77,7 +78,7 @@ Need checking on the live market:
 - Sell by position size: the format of the Data API `/positions` response is taken from the docs, not tested against the live API. The Data API also updates with a delay after a buy, so Sell right after Buy can report "no position".
 - Real orders with the `decimal` amounts: the math is tested, but no real order has been placed since the switch from `float`.
 - Dry-run mode, the double-click guard and the amount limit compile in Unity, but have not been tried in Play Mode.
-- The fix for trade volume after a market switch hasn't been checked at runtime yet.
+- Volume: collecting all trades of the market and the reset after a market switch are covered by tests, but have not been compared with the volume on polymarket.com. Paging assumes the Data API returns the newest trades first.
 
 Still open:
 
