@@ -30,4 +30,20 @@ public static class TradeVolumeCalculator
 
         return Math.Round(volume, 2);
     }
+
+    // How many trades fall inside the interval (same rules as SumInInterval).
+    public static int CountInInterval(IEnumerable<TradeRecord> trades, DateTime start, DateTime end)
+    {
+        if (trades == null) return 0;
+
+        int count = 0;
+        foreach (TradeRecord trade in trades)
+        {
+            DateTime time = DateTimeOffset.FromUnixTimeSeconds(trade.TimestampSeconds).UtcDateTime;
+            if (time >= start && time <= end)
+                count++;
+        }
+
+        return count;
+    }
 }

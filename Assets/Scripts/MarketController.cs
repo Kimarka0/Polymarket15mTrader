@@ -374,7 +374,11 @@ public class MarketController : MonoBehaviour
         ));
 
         if (done && trades != null)
+        {
             UpdateVolumeFromDataTrades(trades);
+            if (enableDebugLogs)
+                LogTradesForInterval(trades);
+        }
 
         yield return new WaitForSeconds(5f);
     }
@@ -383,12 +387,34 @@ private void UpdateVolumeFromDataTrades(DataApiTrade[] trades)
 {
     if (trades == null) return;
 
+    marketState.Current.volumeThis15m = TradeVolumeCalculator.SumInInterval(
+        ToTradeRecords(trades), marketState.Current.sessionStartTime, marketState.Current.sessionEndTime);
+}
+
+private static TradeRecord[] ToTradeRecords(DataApiTrade[] trades)
+{
     var records = new TradeRecord[trades.Length];
     for (int i = 0; i < trades.Length; i++)
         records[i] = new TradeRecord { TimestampSeconds = trades[i].timestamp, Price = trades[i].price, Size = trades[i].size };
+    return records;
+}
 
-    marketState.Current.volumeThis15m = TradeVolumeCalculator.SumInInterval(
-        records, marketState.Current.sessionStartTime, marketState.Current.sessionEndTime);
+// Debug: helps to see why the volume stays at $0.00 (no trades, wrong market or trades outside the interval).
+private void LogTradesForInterval(DataApiTrade[] trades)
+{
+    DateTime start = marketState.Current.sessionStartTime;
+    DateTime end = marketState.Current.sessionEndTime;
+    int inInterval = TradeVolumeCalculator.CountInInterval(ToTradeRecords(trades), start, end);
+
+    long newest = 0;
+    foreach (DataApiTrade trade in trades)
+        if (trade != null && trade.timestamp > newest) newest = trade.timestamp;
+
+    string conditionTail = currentConditionId.Length > 6 ? currentConditionId.Substring(currentConditionId.Length - 6) : currentConditionId;
+    string newestText = newest > 0 ? DateTimeOffset.FromUnixTimeSeconds(newest).UtcDateTime.ToString("HH:mm:ss") : "-";
+
+    Debug.Log($"[TRADES] Data API returned {trades.Length} trades, {inInterval} in the interval " +
+              $"{start:HH:mm:ss}-{end:HH:mm:ss} UTC (newest trade {newestText} UTC), conditionId ...{conditionTail}");
 }
 
     private IEnumerator GetHistoricalStartingPrice(DateTime marketStartTime)

@@ -107,3 +107,25 @@ public class TradeVolumeCalculatorTests
         Assert.That(TradeVolumeCalculator.SumInInterval(null, Start, End), Is.EqualTo(0.0));
     }
 }
+
+public class TradeVolumeCountTests
+{
+    private static readonly DateTime Start = new DateTime(2026, 10, 12, 12, 0, 0, DateTimeKind.Utc);
+    private static readonly DateTime End = Start.AddMinutes(15);
+    private const long StartSeconds = 1791806400;
+
+    [Test]
+    public void CountsOnlyTradesInsideTheInterval_BothEndsIncluded()
+    {
+        var trades = new[]
+        {
+            new TradeRecord { TimestampSeconds = StartSeconds - 1 },
+            new TradeRecord { TimestampSeconds = StartSeconds },
+            new TradeRecord { TimestampSeconds = StartSeconds + 450 },
+            new TradeRecord { TimestampSeconds = StartSeconds + 900 },
+            new TradeRecord { TimestampSeconds = StartSeconds + 901 },
+        };
+        Assert.That(TradeVolumeCalculator.CountInInterval(trades, Start, End), Is.EqualTo(3));
+        Assert.That(TradeVolumeCalculator.CountInInterval(null, Start, End), Is.EqualTo(0));
+    }
+}
