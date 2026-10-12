@@ -83,6 +83,26 @@ public class MarketState
         }
     }
 
+    // Called before a new market is set up, so nothing from the previous market
+    // (tokens, order books, prices, volume) can be used for trading or shown as current.
+    public void ResetForNewMarket()
+    {
+        upTokenId = null;
+        downTokenId = null;
+        conditionId = null;
+
+        upOrderBook = null;
+        downOrderBook = null;
+        upOrderBookLoadedUtc = default;
+        downOrderBookLoadedUtc = default;
+
+        current.bidUp = 0;
+        current.askUp = 0;
+        current.bidDown = 0;
+        current.askDown = 0;
+        current.volumeThis15m = 0;
+    }
+
     public void SetInitialized(bool value)
     {
         isInitialized = value;

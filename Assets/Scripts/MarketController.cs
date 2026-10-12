@@ -222,6 +222,8 @@ public class MarketController : MonoBehaviour
 {
     Debug.Log($"[MarketController] Setting up market: {market.title}");
 
+    marketState.ResetForNewMarket();
+    currentConditionId = null;
     marketState.UpdateMarketInfo(market);
 
     // Get the token ids first. Callbacks cannot yield, so results go through locals.
@@ -323,12 +325,15 @@ public class MarketController : MonoBehaviour
 
         while (isTrading)
         {
-            if (!string.IsNullOrEmpty(marketState.upTokenId))
+            // A response can arrive after a market switch; it is ignored if the token changed meanwhile.
+            string upToken = marketState.upTokenId;
+            if (!string.IsNullOrEmpty(upToken))
             {
                 yield return StartCoroutine(apiManager.GetOrderBook(
-                    marketState.upTokenId,
+                    upToken,
                     b =>
                     {
+                        if (upToken != marketState.upTokenId) return;
                         marketState.upOrderBook = b;
                         marketState.upOrderBookLoadedUtc = DateTime.UtcNow;
 
@@ -341,12 +346,14 @@ public class MarketController : MonoBehaviour
                 ));
             }
 
-            if (!string.IsNullOrEmpty(marketState.downTokenId))
+            string downToken = marketState.downTokenId;
+            if (!string.IsNullOrEmpty(downToken))
             {
                 yield return StartCoroutine(apiManager.GetOrderBook(
-                    marketState.downTokenId,
+                    downToken,
                     b =>
                     {
+                        if (downToken != marketState.downTokenId) return;
                         marketState.downOrderBook = b;
                         marketState.downOrderBookLoadedUtc = DateTime.UtcNow;
                         if (enableDebugLogs) Debug.Log("[CLOB] DOWN book loaded");
