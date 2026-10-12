@@ -24,6 +24,22 @@ public class DataApiTradesResponse
 }
 
 #endregion
+#region Data API Positions
+// One item of GET /positions. Only the fields we use; JsonUtility ignores the rest.
+[Serializable]
+public class DataApiPosition
+{
+    public string asset;   // token id of the outcome
+    public double size;    // shares held
+}
+
+[Serializable]
+public class DataApiPositionsResponse
+{
+    public DataApiPosition[] positions;
+}
+
+#endregion
 #region POLYMARKET MODELS
 [Serializable]
 public class PolymarketEvent

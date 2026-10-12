@@ -42,10 +42,14 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
     private string lastError = "";
 
     private PolymarketClobRestClient clob;
+    private readonly PolymarketDataApiClient dataApi = new PolymarketDataApiClient();
     private float lastTickEmitTime;
 
     // Upper limit for one Buy, in USD.
     private const float MaxOrderUsd = 100f;
+
+    // Minimum order size in shares (per the author).
+    private const decimal MinSellShares = 5m;
 
     // Set while a Buy or Sell coroutine runs, so a second click cannot send a second order.
     private bool isOrderInFlight;
@@ -331,6 +335,11 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
 
         string signerAddress = credsBootstrap.GetSignerAddress();
         string maker = (signatureType == 0) ? signerAddress : funderAddress;
+        if (string.IsNullOrEmpty(maker))
+        {
+            Fail("Sell: maker/funder empty (signatureType !=0 but no funderAddress)");
+            yield break;
+        }
 
         string feeRateBps = "0";
         bool feeOk = false;
@@ -344,10 +353,38 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
         // Requirement: retry until the sell succeeds (up to sellMaxAttempts).
         for (int attempt = 1; attempt <= sellMaxAttempts; attempt++)
         {
-            // Sell a fixed 5 shares (the minimum size, per the author).
-            // TODO: sell the actual position size from Data API /positions.
+            // Ask for the position before every attempt: an earlier attempt may have filled
+            // even if its response was lost, so never reuse an old size.
+            decimal positionSize = 0m;
+            string positionError = null;
+            yield return StartCoroutine(dataApi.GetPositionSize(
+                maker, tokenId,
+                size => positionSize = size,
+                err => positionError = err
+            ));
 
-            decimal sharesToSell = 5m;
+            if (positionError != null)
+            {
+                Debug.LogError($"[SELL] Could not load the position from Data API ({positionError}). Nothing was sold.");
+                yield break;
+            }
+
+            decimal sharesToSell = OrderAmountCalculator.RoundDownShares(positionSize);
+            if (sharesToSell <= 0m)
+            {
+                if (attempt == 1)
+                    Debug.LogError("[SELL] No position in this outcome according to Data API. " +
+                                   "Data API updates with a delay after a buy: try again in a few seconds.");
+                else
+                    Debug.LogWarning($"[SELL] The position is gone before attempt {attempt}, probably sold by an earlier attempt. Stopping.");
+                yield break;
+            }
+
+            if (sharesToSell < MinSellShares)
+            {
+                Debug.LogError($"[SELL] Position is {sharesToSell} shares, below the minimum order size of {MinSellShares}. Nothing was sold.");
+                yield break;
+            }
 
             // Price at the best bid so the FOK order can fill immediately.
             double bid = (activeOutcome == Outcome.Up) ? ms.Current.bidUp : ms.Current.bidDown;
