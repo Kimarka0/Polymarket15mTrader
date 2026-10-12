@@ -44,6 +44,9 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
     private PolymarketClobRestClient clob;
     private float lastTickEmitTime;
 
+    // Upper limit for one Buy, in USD.
+    private const float MaxOrderUsd = 100f;
+
     // Set while a Buy or Sell coroutine runs, so a second click cannot send a second order.
     private bool isOrderInFlight;
 
@@ -140,6 +143,12 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
             return;
         }
 
+        if (!IsValidOrderAmount(value))
+        {
+            Debug.LogWarning($"[TradeManager] Buy ignored: amount must be a number greater than 0 and at most {MaxOrderUsd} USD.");
+            return;
+        }
+
         if (isOrderInFlight)
         {
             Debug.LogWarning("[TradeManager] Buy ignored: another order is still in progress.");
@@ -166,6 +175,11 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
 
         isOrderInFlight = true;
         StartCoroutine(RunOrder(SellCoroutine()));
+    }
+
+    private static bool IsValidOrderAmount(float usd)
+    {
+        return !float.IsNaN(usd) && !float.IsInfinity(usd) && usd > 0f && usd <= MaxOrderUsd;
     }
 
     // Runs an order coroutine and clears isOrderInFlight on every exit:

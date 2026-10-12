@@ -1,3 +1,4 @@
+using System.Globalization;
 using UnityEngine;
 
 public class TradeTestOnGui : MonoBehaviour
@@ -20,13 +21,13 @@ public class TradeTestOnGui : MonoBehaviour
         if (GUI.Button(new Rect(10, 75, 140, 30), "Buy UP"))
         {
             tm.SetActiveOutcomeUp();
-            if (float.TryParse(amountStr, out var v)) tm.Buy(v);
+            BuyWithEnteredAmount();
         }
 
         if (GUI.Button(new Rect(160, 75, 140, 30), "Buy DOWN"))
         {
             tm.SetActiveOutcomeDown();
-            if (float.TryParse(amountStr, out var v)) tm.Buy(v);
+            BuyWithEnteredAmount();
         }
 
         if (GUI.Button(new Rect(10, 115, 140, 30), "Sell (active)"))
@@ -35,5 +36,14 @@ public class TradeTestOnGui : MonoBehaviour
         }
 
         GUI.Label(new Rect(10, 160, 600, 20), "State: " + tm.GetCurrentStates());
+    }
+
+    // InvariantCulture: "5.5" is parsed the same way whatever the OS locale is.
+    private void BuyWithEnteredAmount()
+    {
+        if (float.TryParse(amountStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float usd))
+            tm.Buy(usd);
+        else
+            Debug.LogWarning($"[TradeTest] Not a number: '{amountStr}'. Use a dot as the decimal separator, e.g. 5.5");
     }
 }
