@@ -28,6 +28,9 @@ public class MarketController : MonoBehaviour
     private readonly TradeAccumulator tradeAccumulator = new TradeAccumulator();
     private const int TradesPageSize = 200;
     private const int MaxTradePagesPerPoll = 25;
+
+    // A new market can be listed before its CLOB tokens exist; search again after this delay.
+    private const float TokenRetryDelaySeconds = 3f;
     private Coroutine tradesUpdateCoroutine;
 
     private float logTimer = 0f;
@@ -196,6 +199,18 @@ public class MarketController : MonoBehaviour
             if (foundMarket != null && isTrading && thisMarketId == currentMarketId)
             {
                 yield return StartCoroutine(SetupMarketWithHistoricalPrice(foundMarket));
+
+                // Without tokens there is nothing to trade or poll: search again soon instead of
+                // waiting for the whole interval with the previous market's state.
+                if (!marketState.HasTokens)
+                {
+                    if (isTrading && thisMarketId == currentMarketId)
+                    {
+                        Debug.LogWarning($"[MarketController] Market tokens are not ready yet, searching again in {TokenRetryDelaySeconds} s");
+                        yield return new WaitForSeconds(TokenRetryDelaySeconds);
+                    }
+                    continue;
+                }
 
                 while (marketState.IsMarketActive() && isTrading && thisMarketId == currentMarketId)
                 {

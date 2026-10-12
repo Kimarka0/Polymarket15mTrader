@@ -19,6 +19,8 @@ public class MarketState
     public DateTime upOrderBookLoadedUtc;
     public DateTime downOrderBookLoadedUtc;
 
+    public bool HasTokens => !string.IsNullOrEmpty(upTokenId) && !string.IsNullOrEmpty(downTokenId);
+
     public bool hasRealOrderBook =>
         upOrderBook != null && downOrderBook != null;
 
