@@ -11,7 +11,8 @@ Unity app for Polymarket's 15-minute "Bitcoin Up or Down" markets. It shows live
 - Polls the BTC price and the UP/DOWN order books every second, and recent trades every 5 seconds to calculate volume.
 - Switches to the next market when the interval ends.
 - Gets Polymarket API credentials with an EIP-712 signature (L1 auth, then L2 API keys).
-- Places FOK buy and sell orders, signed locally with Nethereum.
+- Places FOK buy and sell orders, signed locally with Nethereum. Sell uses the actual position size from the Data API.
+- Dry-run mode (default): orders are built and signed but not sent.
 
 If no market is found, the app falls back to a test market. Without order books it shows random test prices.
 
@@ -27,14 +28,18 @@ graph LR
     TM --> BOOT[PolymarketL2CredsBootstrap]
     TM --> REST[PolymarketClobRestClient]
     REST --> CLOB[(CLOB /order)]
+    TM --> DATA[PolymarketDataApiClient]
+    DATA --> POS[(Data API /positions)]
 ```
 
 - `MarketController`: finds the market, runs the polling loops, updates the UI.
 - `ApiManager`: HTTP requests to Polymarket and Binance.
 - `MarketState`: current market data (interval, prices, order books).
-- `PolymarketL2CredsBootstrap`: holds the key and gets API credentials.
-- `PolymarketTradeManager`: builds, signs and sends orders.
-- `OrderAmountCalculator`: order amount math without Unity dependencies. Covered by tests, not wired into trading yet.
+- `PolymarketL2CredsBootstrap`: loads the key from a local file and gets API credentials (kept in memory).
+- `PolymarketTradeManager`: builds, signs and sends orders; dry run, double-click guard, amount limit.
+- `PolymarketDataApiClient`: reads the current position size for Sell.
+- `OrderAmountCalculator`: order amounts in `decimal`, used by `PolymarketTradeManager`.
+- `MarketInterval`, `TradeVolumeCalculator`: 15-minute interval, market slugs and trade volume, without Unity dependencies.
 
 ## Requirements
 
@@ -48,11 +53,13 @@ graph LR
 
 **Trading:**
 
-1. Enter the private key in the `privateKeyHex` field of `PolymarketL2CredsBootstrap`.
+1. Copy `Secrets/polymarket.example.json` to `Secrets/polymarket.local.json` and put the private key there. The `Secrets/` folder is in `.gitignore`, only the example file is tracked.
 2. Press Play and wait for "Derived existing API credentials." or "Created new API credentials." in the console.
 3. Click Start, wait for an active market, then use the Buy UP / Buy DOWN / Sell buttons.
 
-The key is saved in the scene file, so clear the field before committing, otherwise it ends up in git. API credentials are stored in PlayerPrefs (Edit → Clear All PlayerPrefs removes them).
+By default `realTradingEnabled` on `PolymarketTradeManager` is off: Buy and Sell build and sign the order and log a short summary, but do not send it. Turn it on in the Inspector to place real orders. One Buy is limited to 100 USD, and a second click is ignored while an order is in progress.
+
+API credentials are kept in memory only. Older versions stored them in PlayerPrefs; those entries are deleted on start. The key file is read from the project folder, so this setup works in the Editor; a build needs its own place for the file.
 
 ## Tests
 
@@ -61,16 +68,21 @@ cd OrderMath
 dotnet test
 ```
 
-The order math lives in a separate .NET project so it can be tested without Unity. The tests cover edge cases (zero, negative, NaN, extreme prices, rounding) and compare the class with the original formulas on several million inputs. `Assets/Scripts/OrderAmountCalculator.cs` is a copy of the same file.
+The pure C# classes (`OrderAmountCalculator`, `MarketInterval`, `TradeVolumeCalculator`) are linked from `Assets/Scripts` into a separate .NET project, so there is one copy and it can be tested without Unity. The tests cover order amounts (zero, negative, NaN, extreme prices, rounding, rounding down positions), the 15-minute interval and slugs, and trade volume. A reference test measures how the `decimal` amounts differ from the old `float` formulas: for example a $16.03 buy is now exactly 16030000 micro-USDC instead of 16030001.
 
 ## Known issues
 
-- Sell always sells 5 shares, not the actual position size.
-- No double-click protection: two clicks on Buy send two orders.
-- Money is stored in `float`/`double` instead of `decimal`.
-- The key lives in the scene and API secrets in PlayerPrefs.
-- `MarketController` is too big and should be split up.
+Need checking on the live market:
+
+- Sell by position size: the format of the Data API `/positions` response is taken from the docs, not tested against the live API. The Data API also updates with a delay after a buy, so Sell right after Buy can report "no position".
+- Real orders with the `decimal` amounts: the math is tested, but no real order has been placed since the switch from `float`.
+- Dry-run mode, the double-click guard and the amount limit compile in Unity, but have not been tried in Play Mode.
 - The fix for trade volume after a market switch hasn't been checked at runtime yet.
+
+Still open:
+
+- `MarketController` is still large: the pure logic moved out, but market search, polling loops and UI updates are still in one class.
+- The 5-share minimum for Sell is hard-coded instead of read from the order book.
 
 ## About this project
 
