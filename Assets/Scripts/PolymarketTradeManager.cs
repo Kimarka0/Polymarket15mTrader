@@ -44,6 +44,9 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
     private PolymarketClobRestClient clob;
     private float lastTickEmitTime;
 
+    // Set while a Buy or Sell coroutine runs, so a second click cannot send a second order.
+    private bool isOrderInFlight;
+
     private enum Outcome { Up, Down }
     private Outcome activeOutcome = Outcome.Up;
 
@@ -137,7 +140,14 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
             return;
         }
 
-        StartCoroutine(BuyCoroutine(value));
+        if (isOrderInFlight)
+        {
+            Debug.LogWarning("[TradeManager] Buy ignored: another order is still in progress.");
+            return;
+        }
+
+        isOrderInFlight = true;
+        StartCoroutine(RunOrder(BuyCoroutine(value)));
     }
 
     public void Sell()
@@ -148,7 +158,35 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
             return;
         }
 
-        StartCoroutine(SellCoroutine());
+        if (isOrderInFlight)
+        {
+            Debug.LogWarning("[TradeManager] Sell ignored: another order is still in progress.");
+            return;
+        }
+
+        isOrderInFlight = true;
+        StartCoroutine(RunOrder(SellCoroutine()));
+    }
+
+    // Runs an order coroutine and clears isOrderInFlight on every exit:
+    // normal end, yield break or an exception thrown inside the order.
+    private IEnumerator RunOrder(IEnumerator order)
+    {
+        try
+        {
+            while (order.MoveNext())
+                yield return order.Current;
+        }
+        finally
+        {
+            isOrderInFlight = false;
+        }
+    }
+
+    // Unity does not run finally blocks of coroutines that are stopped or disabled.
+    private void OnDisable()
+    {
+        isOrderInFlight = false;
     }
 
     private IEnumerator BuyCoroutine(float usdToSpend)
