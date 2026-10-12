@@ -220,16 +220,9 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
         }
 
         double ask = (activeOutcome == Outcome.Up) ? ms.Current.askUp : ms.Current.askDown;
-        if (ask <= 0.000001)
+        if (!OrderAmountCalculator.TryCalculateBuy(usdToSpend, ask, out OrderAmounts amounts, out string amountError))
         {
-            Fail("Buy: ask price invalid");
-            yield break;
-        }
-
-        double size = usdToSpend / ask;
-        if (size <= 0.000001)
-        {
-            Fail("Buy: size too small");
+            Fail("Buy: " + amountError);
             yield break;
         }
 
@@ -264,8 +257,8 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
         string tsString = serverTs.ToString();
 
         // Amounts are integers in 1e6 units.
-        BigInteger makerAmount = new BigInteger(Math.Round(usdToSpend * PolymarketConstants.AMOUNT_SCALE)); // USDC micro
-        BigInteger takerAmount = new BigInteger(Math.Round(size * PolymarketConstants.AMOUNT_SCALE));       // shares micro
+        BigInteger makerAmount = new BigInteger(amounts.MakerAmount); // USDC micro
+        BigInteger takerAmount = new BigInteger(amounts.TakerAmount); // shares micro
 
         // BUY order: maker pays USDC, taker receives shares.
 
@@ -354,7 +347,7 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
             // Sell a fixed 5 shares (the minimum size, per the author).
             // TODO: sell the actual position size from Data API /positions.
 
-            double sharesToSell = 5.0;
+            decimal sharesToSell = 5m;
 
             // Price at the best bid so the FOK order can fill immediately.
             double bid = (activeOutcome == Outcome.Up) ? ms.Current.bidUp : ms.Current.bidDown;
@@ -370,8 +363,14 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
             if (serverTs <= 0) { Fail("Sell: server time error"); yield break; }
             string tsString = serverTs.ToString();
 
-            BigInteger makerAmount = new BigInteger(Math.Round(sharesToSell * PolymarketConstants.AMOUNT_SCALE)); // shares
-            BigInteger takerAmount = new BigInteger(Math.Round(sharesToSell * bid * PolymarketConstants.AMOUNT_SCALE)); // USDC
+            if (!OrderAmountCalculator.TryCalculateSell(sharesToSell, bid, out OrderAmounts amounts, out string amountError))
+            {
+                Fail("Sell: " + amountError);
+                yield break;
+            }
+
+            BigInteger makerAmount = new BigInteger(amounts.MakerAmount); // shares
+            BigInteger takerAmount = new BigInteger(amounts.TakerAmount); // USDC
 
             BigInteger expiration = new BigInteger(serverTs + 60);
             BigInteger nonce = BigInteger.Zero;
