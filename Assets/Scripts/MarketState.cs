@@ -15,6 +15,10 @@ public class MarketState
     public ClobOrderBook upOrderBook;
     public ClobOrderBook downOrderBook;
 
+    // When each book was received (UTC), to reject stale books before trading.
+    public DateTime upOrderBookLoadedUtc;
+    public DateTime downOrderBookLoadedUtc;
+
     public bool hasRealOrderBook =>
         upOrderBook != null && downOrderBook != null;
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Linq;
 using System.Numerics;
 using UnityEngine;
 using Nethereum.Signer;
@@ -223,13 +224,6 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
             yield break;
         }
 
-        double ask = (activeOutcome == Outcome.Up) ? ms.Current.askUp : ms.Current.askDown;
-        if (!OrderAmountCalculator.TryCalculateBuy(usdToSpend, ask, out OrderAmounts amounts, out string amountError))
-        {
-            OrderFailed("Buy not sent: " + amountError);
-            yield break;
-        }
-
         // feeRateBps is a required field of POST /order.
         string feeRateBps = "0";
         bool feeOk = false;
@@ -259,6 +253,20 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
         yield return StartCoroutine(credsBootstrap.GetServerTime(ts => serverTs = ts));
         if (serverTs <= 0) { OrderFailed("Buy not sent: could not get the server time. Try again."); yield break; }
         string tsString = serverTs.ToString();
+
+        // Price from the order book of this token only, and only if it is fresh.
+        if (!TryGetOrderBookPrice(ms, tokenId, forBuy: true, out decimal ask, out string bookError))
+        {
+            OrderFailed($"Buy not sent: {bookError}. Try again in a few seconds.");
+            yield break;
+        }
+
+        if (!OrderAmountCalculator.TryToDecimal(usdToSpend, out decimal usd) ||
+            !OrderAmountCalculator.TryCalculateBuy(usd, ask, out OrderAmounts amounts, out string amountError))
+        {
+            OrderFailed("Buy not sent: invalid amount or price.");
+            yield break;
+        }
 
         // Amounts are integers in 1e6 units.
         BigInteger makerAmount = new BigInteger(amounts.MakerAmount); // USDC micro
@@ -395,11 +403,10 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
                 yield break;
             }
 
-            // Price at the best bid so the FOK order can fill immediately.
-            double bid = (activeOutcome == Outcome.Up) ? ms.Current.bidUp : ms.Current.bidDown;
-            if (bid <= 0.000001)
+            // Price at the best bid so the FOK order can fill immediately, from a fresh book of this token only.
+            if (!TryGetOrderBookPrice(ms, tokenId, forBuy: false, out decimal bid, out string bookError))
             {
-                Debug.LogWarning("[SELL] bid invalid; retry...");
+                Debug.LogWarning($"[SELL] attempt={attempt}: {bookError}; retrying.");
                 yield return new WaitForSeconds(sellRetryDelaySeconds);
                 continue;
             }
@@ -480,8 +487,21 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
         OrderFailed($"Sell: not filled after {sellMaxAttempts} attempts. Check your position before trying again.");
     }
 
+    // Best ask (buy) or best bid (sell) for the active outcome, see OrderBookCheck.
+    private bool TryGetOrderBookPrice(MarketState ms, string tokenId, bool forBuy, out decimal price, out string reason)
+    {
+        bool up = activeOutcome == Outcome.Up;
+        ClobOrderBook book = up ? ms.upOrderBook : ms.downOrderBook;
+        DateTime loadedAt = up ? ms.upOrderBookLoadedUtc : ms.downOrderBookLoadedUtc;
+        ClobOrder[] side = forBuy ? book?.asks : book?.bids;
+
+        return OrderBookCheck.TryGetBestPrice(
+            tokenId, book?.asset_id, side?.Select(o => o?.price), lowest: forBuy,
+            loadedAt, DateTime.UtcNow, out price, out reason);
+    }
+
     // Signed order summary for dry runs. No signature, keys or API credentials.
-    private void LogDryRun(string side, string tokenId, double price, BigInteger makerAmount, BigInteger takerAmount, BigInteger expiration)
+    private void LogDryRun(string side, string tokenId, decimal price, BigInteger makerAmount, BigInteger takerAmount, BigInteger expiration)
     {
         string outcome = (activeOutcome == Outcome.Up) ? "UP" : "DOWN";
         string tokenTail = tokenId.Length > 6 ? tokenId.Substring(tokenId.Length - 6) : tokenId;

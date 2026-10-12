@@ -330,6 +330,7 @@ public class MarketController : MonoBehaviour
                     b =>
                     {
                         marketState.upOrderBook = b;
+                        marketState.upOrderBookLoadedUtc = DateTime.UtcNow;
 
                         if (string.IsNullOrEmpty(currentConditionId) && b != null && !string.IsNullOrEmpty(b.market))
                          currentConditionId = b.market; 
@@ -347,6 +348,7 @@ public class MarketController : MonoBehaviour
                     b =>
                     {
                         marketState.downOrderBook = b;
+                        marketState.downOrderBookLoadedUtc = DateTime.UtcNow;
                         if (enableDebugLogs) Debug.Log("[CLOB] DOWN book loaded");
                     },
                     err => Debug.LogError("[CLOB] DOWN error: " + err)
