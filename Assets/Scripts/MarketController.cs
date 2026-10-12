@@ -328,7 +328,7 @@ public class MarketController : MonoBehaviour
                         if (string.IsNullOrEmpty(currentConditionId) && b != null && !string.IsNullOrEmpty(b.market))
                          currentConditionId = b.market; 
 
-                        Debug.Log("[CLOB] UP book loaded");
+                        if (enableDebugLogs) Debug.Log("[CLOB] UP book loaded");
                     },
                     err => Debug.LogError("[CLOB] UP error: " + err)
                 ));
@@ -341,7 +341,7 @@ public class MarketController : MonoBehaviour
                     b =>
                     {
                         marketState.downOrderBook = b;
-                        Debug.Log("[CLOB] DOWN book loaded");
+                        if (enableDebugLogs) Debug.Log("[CLOB] DOWN book loaded");
                     },
                     err => Debug.LogError("[CLOB] DOWN error: " + err)
                 ));
