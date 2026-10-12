@@ -243,10 +243,7 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
         ));
         while (!feeOk) yield return null;
 
-        string apiKey = PlayerPrefs.GetString("PM_APIKEY", "");
-        string secret = PlayerPrefs.GetString("PM_SECRET", "");
-        string pass = PlayerPrefs.GetString("PM_PASSPHRASE", "");
-        if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(secret) || string.IsNullOrEmpty(pass))
+        if (!credsBootstrap.TryGetApiCreds(out string apiKey, out string secret, out string pass))
         {
             Fail("Buy: no L2 creds (run bootstrap)");
             yield break;
@@ -281,7 +278,7 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
             tokenId, makerAmount, takerAmount, expiration, nonce, feeRateBps, side: 0, salt: salt
         );
 
-        var ecKey = new EthECKey(credsBootstrap.GetPrivateKeyHex()); // TEST ONLY: the key comes from the inspector
+        var ecKey = new EthECKey(credsBootstrap.GetPrivateKeyHex()); // key from Secrets/polymarket.local.json
         string orderSig = new Eip712TypedDataSigner().SignTypedDataV4(typedJson, ecKey);
 
         string payload = BuildPostOrderPayload(
@@ -333,10 +330,7 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
             yield break;
         }
 
-        string apiKey = PlayerPrefs.GetString("PM_APIKEY", "");
-        string secret = PlayerPrefs.GetString("PM_SECRET", "");
-        string pass = PlayerPrefs.GetString("PM_PASSPHRASE", "");
-        if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(secret) || string.IsNullOrEmpty(pass))
+        if (!credsBootstrap.TryGetApiCreds(out string apiKey, out string secret, out string pass))
         {
             Fail("Sell: no L2 creds");
             yield break;

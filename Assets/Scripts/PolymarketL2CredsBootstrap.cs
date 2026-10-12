@@ -17,8 +17,12 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
     [SerializeField] private int chainId = 137; // Polygon mainnet
 
     [Header("Signer (L1)")]
-    [Tooltip("Private key (0x...) ТОЛЬКО для теста. Не храни так в проде.")]
+    // Not used any more: the key is read from Secrets/polymarket.local.json (see LocalSecrets).
+    // Kept and hidden so existing scenes still load without changes.
+#pragma warning disable CS0414 // intentionally unused, see above
+    [HideInInspector]
     [SerializeField] private string privateKeyHex = "0xYOUR_PRIVATE_KEY";
+#pragma warning restore CS0414
 
     [Tooltip("Nonce для API-key. Если использовал раньше и потерял creds — derive работает только с тем же nonce.")]
     [SerializeField] private string nonceString = "0"; // string: a uint256 nonce does not fit into int
@@ -29,6 +33,13 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
     // Fixed text required by Polymarket for L1 auth.
     private const string L1_MESSAGE = "This message attests that I control the given wallet";
     private string signerAddressCached = "";
+
+    // Loaded from the local secrets file and kept only in memory.
+    private string privateKey = "";
+    private ApiCredsResponse apiCreds;
+
+    // Where older versions stored API credentials. They are deleted on start.
+    private static readonly string[] LegacyPlayerPrefsKeys = { "PM_APIKEY", "PM_SECRET", "PM_PASSPHRASE" };
 
     // Field names must match the /auth/* JSON for JsonUtility.
     [Serializable]
@@ -41,14 +52,37 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
 
     private void Start()
     {
+        DeleteLegacyPlayerPrefs();
         StartCoroutine(GetOrCreateApiCredsFlow());
+    }
+
+    private void DeleteLegacyPlayerPrefs()
+    {
+        bool hadAny = false;
+        foreach (string key in LegacyPlayerPrefsKeys)
+        {
+            if (!PlayerPrefs.HasKey(key)) continue;
+            PlayerPrefs.DeleteKey(key);
+            hadAny = true;
+        }
+
+        if (hadAny)
+        {
+            PlayerPrefs.Save();
+            Debug.Log("Deleted old API credentials from PlayerPrefs.");
+        }
     }
 
     private IEnumerator GetOrCreateApiCredsFlow()
     {
+        if (!LocalSecrets.TryLoadPrivateKey(out string loadedKey, out string secretsError))
+        {
+            Debug.LogError(secretsError);
+            yield break;
+        }
+
         // Accept the key with or without the 0x prefix.
-        if (!privateKeyHex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-            privateKeyHex = "0x" + privateKeyHex;
+        privateKey = loadedKey.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? loadedKey : "0x" + loadedKey;
 
         if (!BigInteger.TryParse(nonceString, out var nonce))
         {
@@ -59,7 +93,7 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
         EthECKey ecKey;
         try
         {
-            ecKey = new EthECKey(privateKeyHex);
+            ecKey = new EthECKey(privateKey);
         }
         catch (Exception)
         {
@@ -108,7 +142,7 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
             onSuccess: (creds) =>
             {
                 Debug.Log("Derived existing API credentials.");
-                SaveCredsToPlayerPrefs(creds);
+                StoreCredsInMemory(creds);
                 StartCoroutine(TestBalanceAllowance()); // TEST ONLY
             },
             onNotFoundOrError: () =>
@@ -122,7 +156,7 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
                     onSuccess: (creds) =>
                     {
                         Debug.Log("Created new API credentials.");
-                        SaveCredsToPlayerPrefs(creds);
+                        StoreCredsInMemory(creds);
                         Debug.Log("Starting L2 test...");
                         StartCoroutine(TestBalanceAllowance()); // TEST ONLY
                     }
@@ -261,15 +295,9 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
 {
     Debug.Log("TestBalanceAllowance() entered");
 
-    string apiKey = PlayerPrefs.GetString("PM_APIKEY", "");
-    string secret = PlayerPrefs.GetString("PM_SECRET", "");
-    string pass = PlayerPrefs.GetString("PM_PASSPHRASE", "");
-
-    Debug.Log($"Loaded creds lengths: apiKey={apiKey.Length}, secret={secret.Length}, pass={pass.Length}");
-
-    if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(secret) || string.IsNullOrEmpty(pass))
+    if (!TryGetApiCreds(out string apiKey, out string secret, out string pass))
     {
-        Debug.LogError("No saved creds. Run derive/create first.");
+        Debug.LogError("No API credentials in memory. Run derive/create first.");
         yield break;
     }
 
@@ -330,11 +358,7 @@ private IEnumerator SendL2(
     string bodyJsonOrNull,
     Action<long, string> onDone)
 {
-    string apiKey = PlayerPrefs.GetString("PM_APIKEY", "");
-    string secret = PlayerPrefs.GetString("PM_SECRET", "");
-    string pass = PlayerPrefs.GetString("PM_PASSPHRASE", "");
-
-    if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(secret) || string.IsNullOrEmpty(pass))
+    if (!TryGetApiCreds(out string apiKey, out string secret, out string pass))
     {
         onDone?.Invoke(0, "Missing api creds");
         yield break;
@@ -388,16 +412,21 @@ private IEnumerator SendL2(
     onDone?.Invoke(req.responseCode, req.downloadHandler?.text);
 }
 
-    private void SaveCredsToPlayerPrefs(ApiCredsResponse creds)
+    // API credentials live only in memory for this session; nothing is written to disk.
+    private void StoreCredsInMemory(ApiCredsResponse creds)
     {
-        // TEST ONLY: PlayerPrefs is not secure storage.
-        PlayerPrefs.SetString("PM_APIKEY", creds.apiKey);
-        PlayerPrefs.SetString("PM_SECRET", creds.secret);
-        PlayerPrefs.SetString("PM_PASSPHRASE", creds.passphrase);
-        PlayerPrefs.Save();
+        apiCreds = creds;
 
         if (logAll)
-            Debug.Log("Saved creds to PlayerPrefs (TEST ONLY).");
+            Debug.Log("API credentials stored in memory.");
+    }
+
+    public bool TryGetApiCreds(out string apiKey, out string secret, out string passphrase)
+    {
+        apiKey = apiCreds?.apiKey;
+        secret = apiCreds?.secret;
+        passphrase = apiCreds?.passphrase;
+        return !string.IsNullOrEmpty(apiKey) && !string.IsNullOrEmpty(secret) && !string.IsNullOrEmpty(passphrase);
     }
 
 public string GetSignerAddress()
@@ -408,7 +437,7 @@ public string GetSignerAddress()
 // TEST ONLY: exposes the private key to other classes.
 public string GetPrivateKeyHex()
 {
-    return privateKeyHex;
+    return privateKey;
 }
 
 public string GetClobHost()
