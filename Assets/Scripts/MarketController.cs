@@ -383,23 +383,12 @@ private void UpdateVolumeFromDataTrades(DataApiTrade[] trades)
 {
     if (trades == null) return;
 
-    DateTime sessionStart = marketState.Current.sessionStartTime;
-    DateTime sessionEnd   = marketState.Current.sessionEndTime;
+    var records = new TradeRecord[trades.Length];
+    for (int i = 0; i < trades.Length; i++)
+        records[i] = new TradeRecord { TimestampSeconds = trades[i].timestamp, Price = trades[i].price, Size = trades[i].size };
 
-    double volume = 0;
-
-    foreach (var t in trades)
-    {
-        // Data API timestamps are in seconds.
-        DateTime ts = DateTimeOffset.FromUnixTimeSeconds(t.timestamp).UtcDateTime;
-
-        if (ts < sessionStart || ts > sessionEnd)
-            continue;
-
-        volume += t.price * t.size;
-    }
-
-    marketState.Current.volumeThis15m = Math.Round(volume, 2);
+    marketState.Current.volumeThis15m = TradeVolumeCalculator.SumInInterval(
+        records, marketState.Current.sessionStartTime, marketState.Current.sessionEndTime);
 }
 
     private IEnumerator GetHistoricalStartingPrice(DateTime marketStartTime)

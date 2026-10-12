@@ -95,7 +95,7 @@ public class MarketState
 
             DateTime now = DateTime.UtcNow;
             DateTime marketStartTime = Calculate15MinuteStartTime(now);
-            DateTime marketEndTime = marketStartTime.AddMinutes(15);
+            DateTime marketEndTime = MarketInterval.GetEnd(marketStartTime);
 
             current.sessionStartTime = marketStartTime;
             current.sessionEndTime = marketEndTime;
@@ -116,7 +116,7 @@ public class MarketState
             DateTime startTime = Calculate15MinuteStartTime(now);
 
             current.sessionStartTime = startTime;
-            current.sessionEndTime = startTime.AddMinutes(15);
+            current.sessionEndTime = MarketInterval.GetEnd(startTime);
             current.lastUpdateTime = now;
             isInitialized = true;
         }
@@ -124,13 +124,7 @@ public class MarketState
 
     private DateTime Calculate15MinuteStartTime(DateTime currentTime)
     {
-        int minutes = currentTime.Minute;
-        int remainder = minutes % 15;
-        DateTime startTime = currentTime.AddMinutes(-remainder)
-                                          .AddSeconds(-currentTime.Second)
-                                          .AddMilliseconds(-currentTime.Millisecond);
-
-        return startTime;
+        return MarketInterval.GetStart(currentTime);
     }
 
     public void SetPriceToBeat(double price)

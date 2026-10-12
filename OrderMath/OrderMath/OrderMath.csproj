@@ -11,6 +11,8 @@
   <!-- Pure C# files from the Unity project, linked (not copied), so there is one source of truth. -->
   <ItemGroup>
     <Compile Include="..\..\Assets\Scripts\OrderAmountCalculator.cs" Link="OrderAmountCalculator.cs" />
+    <Compile Include="..\..\Assets\Scripts\MarketInterval.cs" Link="MarketInterval.cs" />
+    <Compile Include="..\..\Assets\Scripts\TradeVolumeCalculator.cs" Link="TradeVolumeCalculator.cs" />
   </ItemGroup>
 
 </Project>

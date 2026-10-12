@@ -314,12 +314,7 @@ public IEnumerator GetMarketBySlug(
     private IEnumerator SearchByGeneratedSlug(Action<PolymarketEvent> onSuccess, Action<string> onError)
     {
         string currentTimestamp = GetCurrent15MinTimestamp();
-        string[] possibleSlugs = {
-            $"btc-updown-15m-{currentTimestamp}",
-            $"bitcoin-updown-15m-{currentTimestamp}",
-            $"btc-15m-{currentTimestamp}",
-            $"bitcoin-15m-{currentTimestamp}"
-        };
+        string[] possibleSlugs = MarketInterval.GetSlugCandidates(currentTimestamp);
 
         foreach (var slug in possibleSlugs)
         {
@@ -426,10 +421,7 @@ public IEnumerator GetMarketBySlug(
 
     private string GetCurrent15MinTimestamp()
     {
-        DateTime now = DateTime.UtcNow;
-        long unixTimestamp = ((DateTimeOffset)now).ToUnixTimeSeconds();
-        long fifteenMinBlocks = unixTimestamp / 900;
-        return (fifteenMinBlocks * 900).ToString();
+        return MarketInterval.GetSlugTimestamp(DateTime.UtcNow);
     }
 
     private PolymarketEvent FindBtc15MinMarket(PolymarketEvent[] events)
