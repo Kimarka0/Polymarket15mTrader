@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 public class MarketController : MonoBehaviour
@@ -22,6 +23,11 @@ public class MarketController : MonoBehaviour
     private Coroutine marketResetCoroutine;
     private Coroutine orderBookCoroutine;
     private string currentConditionId;
+
+    // Trades of the current market collected over all polls (one Data API page is not enough for a busy market).
+    private readonly TradeAccumulator tradeAccumulator = new TradeAccumulator();
+    private const int TradesPageSize = 200;
+    private const int MaxTradePagesPerPoll = 25;
     private Coroutine tradesUpdateCoroutine;
 
     private float logTimer = 0f;
@@ -362,59 +368,93 @@ public class MarketController : MonoBehaviour
             continue;
         }
 
-        bool done = false;
-        DataApiTrade[] trades = null;
+        // Use one conditionId for the whole poll, even if the market switches while pages load.
+        string conditionId = currentConditionId;
+        tradeAccumulator.ResetIfMarketChanged(conditionId);
 
-        yield return StartCoroutine(apiManager.GetTradesByCondition(
-            currentConditionId,
-            limit: 200,
-            offset: 0,
-            onSuccess: t => { trades = t; done = true; },
-            onError: err => { Debug.LogWarning("[TRADES] error: " + err); done = true; }
-        ));
+        DateTime intervalStart = marketState.Current.sessionStartTime;
+        long newestKnownBeforePoll = tradeAccumulator.NewestTimestamp;
+        int pagesFetched = 0;
+        int newTrades = 0;
+        bool fetchNextPage = true;
 
-        if (done && trades != null)
+        while (fetchNextPage && isTrading)
         {
-            UpdateVolumeFromDataTrades(trades);
-            if (enableDebugLogs)
-                LogTradesForInterval(trades);
+            DataApiTrade[] page = null;
+            yield return StartCoroutine(apiManager.GetTradesByCondition(
+                conditionId,
+                limit: TradesPageSize,
+                offset: pagesFetched * TradesPageSize,
+                onSuccess: t => page = t,
+                onError: err => Debug.LogWarning("[TRADES] error: " + err)
+            ));
+            pagesFetched++;
+
+            if (page == null) break;
+
+            TradeRecord[] records = ToTradeRecords(page);
+            newTrades += tradeAccumulator.Add(records);
+            fetchNextPage = TradeAccumulator.ShouldFetchNextPage(
+                records.Length, TradesPageSize, OldestTimestamp(records),
+                newestKnownBeforePoll, intervalStart, pagesFetched, MaxTradePagesPerPoll);
         }
+
+        if (pagesFetched >= MaxTradePagesPerPoll && fetchNextPage)
+            Debug.LogWarning($"[TRADES] Stopped after {MaxTradePagesPerPoll} pages; the volume may miss older trades.");
+
+        UpdateVolumeFromAccumulatedTrades();
+        if (enableDebugLogs)
+            LogTradesForInterval(pagesFetched, newTrades);
 
         yield return new WaitForSeconds(5f);
     }
 }
-private void UpdateVolumeFromDataTrades(DataApiTrade[] trades)
+private void UpdateVolumeFromAccumulatedTrades()
 {
-    if (trades == null) return;
-
     marketState.Current.volumeThis15m = TradeVolumeCalculator.SumInInterval(
-        ToTradeRecords(trades), marketState.Current.sessionStartTime, marketState.Current.sessionEndTime);
+        tradeAccumulator.Trades, marketState.Current.sessionStartTime, marketState.Current.sessionEndTime);
 }
 
 private static TradeRecord[] ToTradeRecords(DataApiTrade[] trades)
 {
-    var records = new TradeRecord[trades.Length];
-    for (int i = 0; i < trades.Length; i++)
-        records[i] = new TradeRecord { TimestampSeconds = trades[i].timestamp, Price = trades[i].price, Size = trades[i].size };
-    return records;
+    var records = new List<TradeRecord>(trades.Length);
+    foreach (DataApiTrade t in trades)
+    {
+        if (t == null) continue;
+        records.Add(new TradeRecord
+        {
+            Key = TradeAccumulator.MakeKey(t.transactionHash, t.asset, t.side, t.proxyWallet, t.size, t.price, t.timestamp),
+            TimestampSeconds = t.timestamp,
+            Price = t.price,
+            Size = t.size
+        });
+    }
+    return records.ToArray();
+}
+
+private static long OldestTimestamp(TradeRecord[] records)
+{
+    long oldest = long.MaxValue;
+    foreach (TradeRecord r in records)
+        if (r.TimestampSeconds < oldest) oldest = r.TimestampSeconds;
+    return records.Length > 0 ? oldest : 0;
 }
 
 // Debug: helps to see why the volume stays at $0.00 (no trades, wrong market or trades outside the interval).
-private void LogTradesForInterval(DataApiTrade[] trades)
+private void LogTradesForInterval(int pagesFetched, int newTrades)
 {
     DateTime start = marketState.Current.sessionStartTime;
     DateTime end = marketState.Current.sessionEndTime;
-    int inInterval = TradeVolumeCalculator.CountInInterval(ToTradeRecords(trades), start, end);
+    int inInterval = TradeVolumeCalculator.CountInInterval(tradeAccumulator.Trades, start, end);
 
-    long newest = 0;
-    foreach (DataApiTrade trade in trades)
-        if (trade != null && trade.timestamp > newest) newest = trade.timestamp;
-
-    string conditionTail = currentConditionId.Length > 6 ? currentConditionId.Substring(currentConditionId.Length - 6) : currentConditionId;
+    long newest = tradeAccumulator.NewestTimestamp;
+    string conditionId = tradeAccumulator.ConditionId ?? "";
+    string conditionTail = conditionId.Length > 6 ? conditionId.Substring(conditionId.Length - 6) : conditionId;
     string newestText = newest > 0 ? DateTimeOffset.FromUnixTimeSeconds(newest).UtcDateTime.ToString("HH:mm:ss") : "-";
 
-    Debug.Log($"[TRADES] Data API returned {trades.Length} trades, {inInterval} in the interval " +
-              $"{start:HH:mm:ss}-{end:HH:mm:ss} UTC (newest trade {newestText} UTC), conditionId ...{conditionTail}");
+    Debug.Log($"[TRADES] Data API: {pagesFetched} page(s), {newTrades} new trades, {tradeAccumulator.Count} collected, " +
+              $"{inInterval} in the interval {start:HH:mm:ss}-{end:HH:mm:ss} UTC (newest trade {newestText} UTC), " +
+              $"conditionId ...{conditionTail}, volume ${marketState.Current.volumeThis15m:F2}");
 }
 
     private IEnumerator GetHistoricalStartingPrice(DateTime marketStartTime)

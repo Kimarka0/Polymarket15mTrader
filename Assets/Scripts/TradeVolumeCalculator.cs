@@ -4,6 +4,7 @@ using System.Collections.Generic;
 // The fields of a Data API trade that the volume needs.
 public struct TradeRecord
 {
+    public string Key; // unique per fill, see TradeAccumulator.MakeKey
     public long TimestampSeconds;
     public double Price;
     public double Size;

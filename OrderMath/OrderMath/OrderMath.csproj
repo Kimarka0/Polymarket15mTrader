@@ -13,6 +13,7 @@
     <Compile Include="..\..\Assets\Scripts\OrderAmountCalculator.cs" Link="OrderAmountCalculator.cs" />
     <Compile Include="..\..\Assets\Scripts\MarketInterval.cs" Link="MarketInterval.cs" />
     <Compile Include="..\..\Assets\Scripts\TradeVolumeCalculator.cs" Link="TradeVolumeCalculator.cs" />
+    <Compile Include="..\..\Assets\Scripts\TradeAccumulator.cs" Link="TradeAccumulator.cs" />
   </ItemGroup>
 
 </Project>
