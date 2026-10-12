@@ -16,6 +16,8 @@ public class PostOrderResponse
 
 public class PolymarketClobRestClient
 {
+    private const int PostOrderTimeoutSeconds = 15;
+
     private readonly string host;
 
     public PolymarketClobRestClient(string host)
@@ -53,8 +55,7 @@ public class PolymarketClobRestClient
         string timestamp,
         string ownerApiKey,
         string orderJson, // full POST /order body: order, owner, orderType
-        Action<PostOrderResponse> onOk,
-        Action<string> onErr
+        Action<OrderSendResult, PostOrderResponse, string> onDone // result, response (if any), error details
     )
     {
         string pathForSig = "/order";
@@ -71,6 +72,7 @@ public class PolymarketClobRestClient
         byte[] bodyRaw = Encoding.UTF8.GetBytes(orderJson);
 
         using var req = new UnityWebRequest(url, "POST");
+        req.timeout = PostOrderTimeoutSeconds;
         req.uploadHandler = new UploadHandlerRaw(bodyRaw);
         req.downloadHandler = new DownloadHandlerBuffer();
         req.SetRequestHeader("Content-Type", "application/json");
@@ -83,21 +85,18 @@ public class PolymarketClobRestClient
 
         yield return req.SendWebRequest();
 
-        if (req.result != UnityWebRequest.Result.Success)
+        long status = req.responseCode; // 0 when no response arrived
+        string body = req.downloadHandler?.text ?? "";
+
+        PostOrderResponse resp = null;
+        if (status >= 200 && status < 300)
         {
-            onErr?.Invoke($"PostOrder error: {req.responseCode} {req.error} {req.downloadHandler?.text}");
-            yield break;
+            try { resp = JsonUtility.FromJson<PostOrderResponse>(body); }
+            catch (Exception) { resp = null; }
         }
 
-        string json = req.downloadHandler.text;
-        var resp = JsonUtility.FromJson<PostOrderResponse>(json);
-
-        if (resp == null)
-        {
-            onErr?.Invoke("PostOrder parse error: " + json);
-            yield break;
-        }
-
-        onOk?.Invoke(resp);
+        OrderSendResult result = OrderSendOutcome.Classify(status, resp != null, resp != null && resp.success);
+        string details = result == OrderSendResult.Accepted ? null : $"HTTP {status} {req.error} {resp?.errorMsg ?? body}".Trim();
+        onDone?.Invoke(result, resp, details);
     }
 }

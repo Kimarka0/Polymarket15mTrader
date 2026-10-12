@@ -143,7 +143,7 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
     {
         if (state != MarketManagerStates.InProgress)
         {
-            Debug.LogWarning("[TradeManager] Buy ignored: state=" + state);
+            Debug.LogWarning("[TradeManager] Buy ignored: " + NotReadyReason());
             return;
         }
 
@@ -167,7 +167,7 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
     {
         if (state != MarketManagerStates.InProgress)
         {
-            Debug.LogWarning("[TradeManager] Sell ignored: state=" + state);
+            Debug.LogWarning("[TradeManager] Sell ignored: " + NotReadyReason());
             return;
         }
 
@@ -212,21 +212,21 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
         var ms = marketController.GetMarketStateSafe();
         if (ms == null || !ms.IsInitialized)
         {
-            Fail("Buy: market not ready");
+            OrderFailed("Buy not sent: market data is not loaded yet. Try again in a few seconds.");
             yield break;
         }
 
         string tokenId = (activeOutcome == Outcome.Up) ? ms.upTokenId : ms.downTokenId;
         if (string.IsNullOrEmpty(tokenId))
         {
-            Fail("Buy: tokenId empty");
+            OrderFailed("Buy not sent: the token of the new market is not loaded yet. Try again in a few seconds.");
             yield break;
         }
 
         double ask = (activeOutcome == Outcome.Up) ? ms.Current.askUp : ms.Current.askDown;
         if (!OrderAmountCalculator.TryCalculateBuy(usdToSpend, ask, out OrderAmounts amounts, out string amountError))
         {
-            Fail("Buy: " + amountError);
+            OrderFailed("Buy not sent: " + amountError);
             yield break;
         }
 
@@ -242,7 +242,7 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
 
         if (!credsBootstrap.TryGetApiCreds(out string apiKey, out string secret, out string pass))
         {
-            Fail("Buy: no L2 creds (run bootstrap)");
+            OrderFailed("Buy not sent: API credentials are not ready (bootstrap is still running or failed, see the log above).");
             yield break;
         }
 
@@ -257,7 +257,7 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
 
         long serverTs = 0;
         yield return StartCoroutine(credsBootstrap.GetServerTime(ts => serverTs = ts));
-        if (serverTs <= 0) { Fail("Buy: server time error"); yield break; }
+        if (serverTs <= 0) { OrderFailed("Buy not sent: could not get the server time. Try again."); yield break; }
         string tsString = serverTs.ToString();
 
         // Amounts are integers in 1e6 units.
@@ -301,13 +301,22 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
             timestamp: tsString,
             ownerApiKey: apiKey,
             orderJson: payload,
-            onOk: resp =>
+            onDone: (result, resp, details) =>
             {
-                Debug.Log($"[BUY] success={resp.success} status={resp.status} orderId={resp.orderId} err={resp.errorMsg}");
-                if (resp.success) BuyComplitedEvent?.Invoke();
-                else Fail("Buy failed: " + resp.errorMsg);
-            },
-            onErr: err => Fail(err)
+                if (result == OrderSendResult.Accepted)
+                {
+                    Debug.Log($"[BUY] success status={resp.status} orderId={resp.orderId}");
+                    BuyComplitedEvent?.Invoke();
+                }
+                else if (result == OrderSendResult.Rejected)
+                {
+                    OrderFailed($"Buy rejected by the exchange ({details}). Nothing was bought, you can try again.");
+                }
+                else
+                {
+                    OrderFailed($"Buy: no clear answer from POST /order ({details}). The result is unknown: check your position before trying again.");
+                }
+            }
         ));
     }
 
@@ -316,20 +325,20 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
         var ms = marketController.GetMarketStateSafe();
         if (ms == null || !ms.IsInitialized)
         {
-            Fail("Sell: market not ready");
+            OrderFailed("Sell not sent: market data is not loaded yet. Try again in a few seconds.");
             yield break;
         }
 
         string tokenId = (activeOutcome == Outcome.Up) ? ms.upTokenId : ms.downTokenId;
         if (string.IsNullOrEmpty(tokenId))
         {
-            Fail("Sell: tokenId empty");
+            OrderFailed("Sell not sent: the token of the new market is not loaded yet. Try again in a few seconds.");
             yield break;
         }
 
         if (!credsBootstrap.TryGetApiCreds(out string apiKey, out string secret, out string pass))
         {
-            Fail("Sell: no L2 creds");
+            OrderFailed("Sell not sent: API credentials are not ready (bootstrap is still running or failed, see the log above).");
             yield break;
         }
 
@@ -397,12 +406,12 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
 
             long serverTs = 0;
             yield return StartCoroutine(credsBootstrap.GetServerTime(ts => serverTs = ts));
-            if (serverTs <= 0) { Fail("Sell: server time error"); yield break; }
+            if (serverTs <= 0) { OrderFailed("Sell not sent: could not get the server time. Try again."); yield break; }
             string tsString = serverTs.ToString();
 
             if (!OrderAmountCalculator.TryCalculateSell(sharesToSell, bid, out OrderAmounts amounts, out string amountError))
             {
-                Fail("Sell: " + amountError);
+                OrderFailed("Sell not sent: " + amountError);
                 yield break;
             }
 
@@ -436,8 +445,7 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
                 yield break;
             }
 
-            bool done = false;
-            bool ok = false;
+            OrderSendResult sendResult = OrderSendResult.Unknown;
 
             yield return StartCoroutine(clob.PostOrder(
                 apiKey: apiKey,
@@ -447,23 +455,20 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
                 timestamp: tsString,
                 ownerApiKey: apiKey,
                 orderJson: payload,
-                onOk: resp =>
+                onDone: (result, resp, details) =>
                 {
-                    Debug.Log($"[SELL] attempt={attempt} success={resp.success} status={resp.status} orderId={resp.orderId} err={resp.errorMsg}");
-                    done = true;
-                    ok = resp.success;
-                },
-                onErr: err =>
-                {
-                    Debug.LogWarning("[SELL] attempt=" + attempt + " " + err);
-                    done = true;
-                    ok = false;
+                    sendResult = result;
+                    if (result == OrderSendResult.Accepted)
+                        Debug.Log($"[SELL] attempt={attempt} success status={resp.status} orderId={resp.orderId}");
+                    else if (result == OrderSendResult.Rejected)
+                        Debug.LogWarning($"[SELL] attempt={attempt} rejected by the exchange ({details}).");
+                    else
+                        Debug.LogWarning($"[SELL] attempt={attempt}: no clear answer from POST /order ({details}). " +
+                                         "The result is unknown; the position is checked again before the next attempt.");
                 }
             ));
 
-            while (!done) yield return null;
-
-            if (ok)
+            if (sendResult == OrderSendResult.Accepted)
             {
                 SellComplitedEvent?.Invoke();
                 yield break;
@@ -472,7 +477,7 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
             yield return new WaitForSeconds(sellRetryDelaySeconds);
         }
 
-        Fail($"Sell: exceeded max attempts ({sellMaxAttempts})");
+        OrderFailed($"Sell: not filled after {sellMaxAttempts} attempts. Check your position before trying again.");
     }
 
     // Signed order summary for dry runs. No signature, keys or API credentials.
@@ -484,11 +489,26 @@ public class PolymarketTradeManager : MonoBehaviour, TradeManager
                   $"expiration={expiration} token=...{tokenTail}. Order signed, not sent (realTradingEnabled is off).");
     }
 
+    // An order did not go through. Trading stays available, so the user can try again.
+    private void OrderFailed(string message)
+    {
+        lastError = message;
+        Debug.LogError("[TradeManager] " + message);
+    }
+
+    // A setup problem that a retry cannot fix (for example no funder address). Stops trading until the next market.
     private void Fail(string err)
     {
         lastError = err;
         Debug.LogError("[TradeManager] " + err);
         SetState(MarketManagerStates.Error);
+    }
+
+    private string NotReadyReason()
+    {
+        if (state == MarketManagerStates.Error)
+            return $"trading is stopped by an error: {lastError}";
+        return $"the market is not ready for trading yet (state={state}). Wait until the new market has loaded.";
     }
 
     private string BuildOrderTypedJson(
