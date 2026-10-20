@@ -606,13 +606,13 @@ private void LogTradesForInterval(int pagesFetched, int newTrades)
         if (!enableDebugLogs || !marketState.IsInitialized || !isTrading) return;
 
         var data = marketState.Current;
-        DateTime now = DateTime.Now;
+        DateTime now = DateTime.UtcNow;
         int secondsRemaining = marketState.GetSecondsRemaining();
 
         TimeSpan timeElapsed = DateTime.UtcNow - data.sessionStartTime;
         TimeSpan marketDuration = data.sessionEndTime - data.sessionStartTime;
 
-        Debug.Log($"=== Market Data [{now:HH:mm:ss}] ===");
+        Debug.Log($"=== Market Data [{now:HH:mm:ss} UTC] ===");
         Debug.Log($"Market: {data.eventTitle}");
         Debug.Log($"Time elapsed: {timeElapsed:mm\\:ss} / {marketDuration:mm\\:ss}");
         Debug.Log($"Remaining: {secondsRemaining / 60:D2}:{secondsRemaining % 60:D2}");
