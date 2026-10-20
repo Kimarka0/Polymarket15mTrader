@@ -17,6 +17,7 @@ public class PostOrderResponse
 public class PolymarketClobRestClient
 {
     private const int PostOrderTimeoutSeconds = 15;
+    private const int RequestTimeoutSeconds = 10;
 
     private readonly string host;
 
@@ -30,6 +31,7 @@ public class PolymarketClobRestClient
         string url = $"{host}/fee-rate?token_id={UnityWebRequest.EscapeURL(tokenId)}";
 
         using var req = UnityWebRequest.Get(url);
+        req.timeout = RequestTimeoutSeconds;
         yield return req.SendWebRequest();
 
         if (req.result != UnityWebRequest.Result.Success)

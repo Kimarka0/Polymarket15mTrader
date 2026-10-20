@@ -32,6 +32,9 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
 
     // Fixed text required by Polymarket for L1 auth.
     private const string L1_MESSAGE = "This message attests that I control the given wallet";
+
+    // Requests used on the order path (server time) must not hang: an order would stay "in progress" forever.
+    private const int RequestTimeoutSeconds = 10;
     private string signerAddressCached = "";
 
     // Loaded from the local secrets file and kept only in memory.
@@ -171,6 +174,7 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
 
         using (var req = UnityWebRequest.Get(url))
         {
+            req.timeout = RequestTimeoutSeconds;
             yield return req.SendWebRequest();
 
             if (req.result != UnityWebRequest.Result.Success)
@@ -217,6 +221,7 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
 
         using (var req = UnityWebRequest.Get(url))
         {
+            req.timeout = RequestTimeoutSeconds;
             req.SetRequestHeader("POLY_ADDRESS", signerAddress);
             req.SetRequestHeader("POLY_SIGNATURE", l1Signature);
             req.SetRequestHeader("POLY_TIMESTAMP", timestampUnixString);
@@ -261,6 +266,7 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
 
         using (var req = new UnityWebRequest(url, "POST"))
         {
+            req.timeout = RequestTimeoutSeconds;
             req.uploadHandler = new UploadHandlerRaw(bodyRaw);
             req.downloadHandler = new DownloadHandlerBuffer();
             req.SetRequestHeader("Content-Type", "application/json");
@@ -338,6 +344,7 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
 
     using (var req = UnityEngine.Networking.UnityWebRequest.Get(url))
     {
+        req.timeout = RequestTimeoutSeconds;
         // signerAddressCached is the EOA address used for the L1 signature
         req.SetRequestHeader("POLY_ADDRESS", signerAddressCached);
         req.SetRequestHeader("POLY_API_KEY", apiKey);

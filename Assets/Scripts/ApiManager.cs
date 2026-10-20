@@ -9,6 +9,9 @@ public class ApiManager : MonoBehaviour
     private const string GAMMA_API_BASE = "https://gamma-api.polymarket.com";
     private const string CLOB_API_BASE = "https://clob.polymarket.com";
 
+    // No request may hang forever: a stuck request would stop the polling loop that waits for it.
+    private const int RequestTimeoutSeconds = 10;
+
     private IEnumerator GetExactHistoricalPrice(DateTime targetTime, Action<double> onSuccess, Action<string> onError)
     {
         DateTime candleStartTime = new DateTime(
@@ -24,6 +27,7 @@ public class ApiManager : MonoBehaviour
 
         using (UnityWebRequest request = UnityWebRequest.Get(url))
         {
+            request.timeout = RequestTimeoutSeconds;
             yield return request.SendWebRequest();
 
             if (request.result != UnityWebRequest.Result.Success)
@@ -105,6 +109,7 @@ public class ApiManager : MonoBehaviour
 
     using (UnityWebRequest req = UnityWebRequest.Get(url))
     {
+        req.timeout = RequestTimeoutSeconds;
         yield return req.SendWebRequest();
 
         if (req.result != UnityWebRequest.Result.Success)
@@ -124,6 +129,7 @@ public class ApiManager : MonoBehaviour
 
         using (UnityWebRequest request = UnityWebRequest.Get(url))
         {
+            request.timeout = RequestTimeoutSeconds;
             yield return request.SendWebRequest();
 
             if (request.result == UnityWebRequest.Result.Success)
@@ -170,6 +176,7 @@ public class ApiManager : MonoBehaviour
 
     using (UnityWebRequest req = UnityWebRequest.Get(url))
     {
+        req.timeout = RequestTimeoutSeconds;
         req.SetRequestHeader("Accept", "application/json");
 
         yield return req.SendWebRequest();
@@ -196,6 +203,7 @@ public IEnumerator GetMarketBySlug(
 
     using (UnityWebRequest req = UnityWebRequest.Get(url))
     {
+        req.timeout = RequestTimeoutSeconds;
         yield return req.SendWebRequest();
 
         if (req.result != UnityWebRequest.Result.Success)
@@ -220,6 +228,7 @@ public IEnumerator GetMarketBySlug(
 
         using (UnityWebRequest request = UnityWebRequest.Get(url))
         {
+            request.timeout = RequestTimeoutSeconds;
             yield return request.SendWebRequest();
 
             if (request.result != UnityWebRequest.Result.Success)
@@ -255,6 +264,7 @@ public IEnumerator GetMarketBySlug(
 
         using (UnityWebRequest request = UnityWebRequest.Get(url))
         {
+            request.timeout = RequestTimeoutSeconds;
             yield return request.SendWebRequest();
 
             bool hasError = false;
@@ -354,6 +364,7 @@ public IEnumerator GetMarketBySlug(
 
         using (UnityWebRequest request = UnityWebRequest.Get(url))
         {
+            request.timeout = RequestTimeoutSeconds;
             yield return request.SendWebRequest();
 
             if (request.result != UnityWebRequest.Result.Success)
@@ -399,6 +410,7 @@ public IEnumerator GetMarketBySlug(
 
     using (var req = UnityWebRequest.Get(url))
     {
+        req.timeout = RequestTimeoutSeconds;
         req.SetRequestHeader("Accept", "application/json");
 
         yield return req.SendWebRequest();
