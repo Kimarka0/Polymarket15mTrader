@@ -30,6 +30,9 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
     [Header("Debug output")]
     [SerializeField] private bool logAll = true;
 
+    [Tooltip("Debug only: after getting API credentials, request the USDC balance and log the raw answer.")]
+    [SerializeField] private bool runBalanceCheckOnStart = false;
+
     // Fixed text required by Polymarket for L1 auth.
     private const string L1_MESSAGE = "This message attests that I control the given wallet";
 
@@ -146,7 +149,7 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
             {
                 Debug.Log("Derived existing API credentials.");
                 StoreCredsInMemory(creds);
-                StartCoroutine(TestBalanceAllowance()); // TEST ONLY
+                if (runBalanceCheckOnStart) StartCoroutine(TestBalanceAllowance());
             },
             onNotFoundOrError: () =>
             {
@@ -160,8 +163,7 @@ public class PolymarketL2CredsBootstrap : MonoBehaviour
                     {
                         Debug.Log("Created new API credentials.");
                         StoreCredsInMemory(creds);
-                        Debug.Log("Starting L2 test...");
-                        StartCoroutine(TestBalanceAllowance()); // TEST ONLY
+                        if (runBalanceCheckOnStart) StartCoroutine(TestBalanceAllowance());
                     }
                 ));
             }
